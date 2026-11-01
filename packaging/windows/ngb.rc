@@ -5,8 +5,8 @@
 1 24 "ngb.manifest"
 
 1 VERSIONINFO
-FILEVERSION 0,9,46,0
-PRODUCTVERSION 0,9,46,0
+FILEVERSION 0,9,50,0
+PRODUCTVERSION 0,9,50,0
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
@@ -15,8 +15,8 @@ BEGIN
       VALUE "FileDescription", "Ninja Gaiden Black Hurricane (static recompilation)"
       VALUE "ProductName", "Ninja Gaiden Black Hurricane"
       VALUE "OriginalFilename", "ngb-hurricane-zh-x2.1.exe"
-      VALUE "FileVersion", "0.9.46"
-      VALUE "ProductVersion", "0.9.46"
+      VALUE "FileVersion", "0.9.50"
+      VALUE "ProductVersion", "0.9.50"
     END
   END
   BLOCK "VarFileInfo"

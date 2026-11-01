@@ -1,7 +1,7 @@
 /* The Hurricane build's version: the upstream ngbrecomp version it is based on, plus "-1", "-2", ... for our own
  * releases on top of it. Shown in the window title; packaging/windows/ngb.rc carries the same number. */
 #pragma once
-#define NGB_HURRICANE_VERSION "0.9.46"
+#define NGB_HURRICANE_VERSION "0.9.50"
 #define NGB_WINDOW_TITLE "Ninja Gaiden Black Hurricane_x2.1_v" NGB_HURRICANE_VERSION
 /* The folders of the installed game, saves, settings and shader cache (%LOCALAPPDATA%, %APPDATA%, XDG): its own,
  * so ngbrecomp's retail install beside it is never taken for this one (user 2026-10-17). */

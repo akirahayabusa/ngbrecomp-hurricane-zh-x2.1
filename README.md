@@ -38,10 +38,10 @@ No game data is included. You need your own copy of the game and the x2.1 patch.
 - ngbrecomp's PC features: high render resolutions, 16:9 / 16:10 / 21:9 / 32:9, keyboard and mouse with
   rebinding, button prompts (Auto / Xbox / PlayStation / PC), MSAA, anisotropic filtering, steady frame pacing,
   Camera Sensitivity, Smoother Glow, Lower Detail Under Load and a Multithreaded Renderer (off unless chosen);
-  under Gameplay an NG2-style d-pad Quick Menu for weapons, Ninpo and items, Essence-Only Charging and Skip Any
-  Cutscene (each off unless chosen); cheats including Infinite Items (healing items, the Talisman of Rebirth and
-  the Jewel of the Demon Seal), Infinite Projectiles and All Weapons, and an Unlocks page (difficulties, costumes,
-  Missions, the arcade game, Movie Theater); a HUD on/off switch under Display and Positional Audio
+  under Gameplay an NG2-style d-pad Quick Menu for weapons, Ninpo and items, Essence-Only Charging, Skip Any
+  Cutscene and Responsive Menus (each off unless chosen); cheats including Infinite Items (healing items, the
+  Talisman of Rebirth and the jewels), Infinite Projectiles and One Hit Kill, and an Unlocks page (difficulties,
+  costumes, Missions, the arcade game, Movie Theater; All Weapons, All Armlets and All Scrolls); a HUD on/off switch under Display and Positional Audio
   (Off / Console / Clear, Clear by default) under Sound; sound mixed on the PC (the game's DirectSound on a host mixer: positional 3D sound, the console's
   room reverb, and 5.1 surround with Audio Output Auto / Stereo / 5.1); about 250 MB of video memory at the default settings (was over 3 GB before 0.9.27), and
   textures unused for 30 s give their memory back, so long sessions no longer run out of it.
@@ -68,7 +68,7 @@ F10 frame-rate counter, F11 or Alt+Enter fullscreen. Saves are separate from Xbo
 ## Versions
 
 Releases follow the ngbrecomp version they are based on (`hurricane-v0.9.9` = ngbrecomp 0.9.9); our own
-updates on top of one add `-1`, `-2`, ... The window title shows it: `Ninja Gaiden Black Hurricane_x2.1_v0.9.46`.
+updates on top of one add `-1`, `-2`, ... The window title shows it: `Ninja Gaiden Black Hurricane_x2.1_v0.9.50`.
 
 ## Changes from ngbrecomp
 

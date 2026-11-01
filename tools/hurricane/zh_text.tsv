@@ -83,7 +83,16 @@ ctx	en	zh	use
 	Lower Detail Under Load	高负载时降低画质	E
 	Eases off detail when busy, as on the Xbox; Ryu's shadow may flicker.	负载高时降低画质（与Xbox相同），龙的影子可能闪烁	E
 	Unlocks	解锁	E
-	Difficulties, costumes and the main menu's extras, without earning them. Saved.	无需达成条件，直接开放难度、服装与主菜单的追加内容。会保存	E
+	Every weapon, at its highest level. Turned off, they are taken back.	全部武器，均为最高等级。关闭后收回	E
+	Difficulties, costumes and the main menu's extras (saved); weapons, armlets and scrolls (this session).	难度、服装与主菜单的附加项目（会保存）。武器、腕轮与秘传书（仅本次有效）	E
+	Responsive Menus	即时反应	E
+	Start at the title, in a cutscene's opening wait and after equipping in the pause menu works at once.	标题画面、过场开头的等待和暂停菜单装备后，按开始键立即生效	E
+	All Armlets	全部腕轮	E
+	Every armlet and band. Turned off, they are taken back.	全部腕轮与结。关闭后收回	E
+	All Scrolls	全部秘传书	E
+	The Izuna Drop, Counter Attack and Guillotine Throw scrolls. Turned off, they are taken back.	饭纲落、化劲之法、斩首投的秘传书。关闭后收回	E
+	One Hit Kill	一击必杀	E
+	Any hit that hurts an enemy or a boss kills it. For this session only.	任何对敌人或头目造成伤害的一击都会直接击杀。仅本次有效	E
 	Missions	任务模式	E
 	MISSIONS in the main menu without earning it.	主菜单的任务模式无需达成条件直接开放	E
 	Arcade Ninja Gaiden	街机版	E
@@ -238,7 +247,6 @@ cat	Controls	按键	P
 	Sounds placed left and right. Clear: by level only. Console: as the Xbox on speakers, duller.	把声音分到左右。清晰：只按音量定位。主机原版：与Xbox接音箱时相同，声音不够清晰	E
 	Speakers. Auto: 5.1 when the output device has 5.1 or 7.1 channels, else stereo. Needs a restart of the game.	自动：输出设备有5.1或7.1声道时用5.1，否则用立体声。重启游戏后生效	E
 	All Weapons	全部武器	E
-	Every weapon and projectile weapon, at its highest level. Turned off, they are taken back.\nA save made while it is on keeps them.	全部武器与飞行道具，均为最高等级。关闭后收回。\n开启时存档，存档里会保留这些武器	E
 	Essence-Only Charging	只用精魂蓄力	E
 	Holding attack no longer charges an Ultimate Technique: only absorbing essence does.	按住攻击不再蓄力绝技，只有吸收精魂才能蓄力	E
 	Skip Any Cutscene	跳过任何过场	E

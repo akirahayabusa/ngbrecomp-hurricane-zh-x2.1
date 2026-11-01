@@ -112,7 +112,7 @@ from Linux x86-64:
   their extensions (`instance.c`; `NV2A_VK_NO13=1` forces that path on the desktop, for testing). On an
   Adreno whose own driver lacks them, Turnip (Mesa's Vulkan driver for Adreno, built from Mesa's
   release by `packaging/android/build.sh`) is loaded for the app by libadrenotools (`src/android_gpu.c`,
-  through `nv2a_vk_custom_loader`; Graphics > GPU Driver, Auto by default; `NGB_GPU_DRIVER=system|turnip`);
+  through `nv2a_vk_custom_loader`; no setting, `NGB_GPU_DRIVER=system|turnip` forces one for testing);
   the window's surface is then made through that loader (`present_sdl.c`).
 - **Defaults:** fullscreen, the Multithreaded Renderer on (60 fps against 42-58 without on a Pixel 9a).
   The arcade programs and Return to Main Menu's restart are not there yet (no programs to start beside
@@ -191,6 +191,18 @@ and cleared by the script's own commands in sub_001DD300). The function is taken
 the watched test passed while the option is on; a cutscene its script never makes skippable still is not, and
 the watched bytes are not written, so saves do not change. The same option lets Start end a movie
 (`src/movie_skip.c`). Off unless chosen (0.9.43 alone had it on).
+
+Responsive Menus (Gameplay; `src/responsive.c`, #116), presses the game ignores for a while taken at once. The
+title reads no button until its frame count (0x45A7F4, while 0x45A7F8 is 1) passes 0x43B688 + 0x43B694 (40
+frames of fade-in, then 60 with PRESS START up); once the prompt is drawn the count is set to the mark. A
+cutscene's script often waits before making it skippable (the chapter 1 waterfall 180 frames: a wait of frames
+counted down in 0x8D3A52 while 0x8D3A50 is 2), and the skip jumps the script to its end mark without running
+what lies between, so the skip is not let through early: a new Start press, when the script reaches its
+skippable command (3 0) a few commands on with no jump between, ends the waits before it and is kept for the skip. The event's state
+is reset as sub_001DBEE0 starts each event. The pause menu's message box (sub_00212500, taken: "equipped" and
+the like, 0x8DB848 the message, 0x8DB84C its 60 frames) returns busy while up and its callers set bit 0x1000 of
+0xDA41E8, which keeps the menu from closing; with the option it returns 0. Equipping also leaves the list in a
+state (bit 1 of 0xDA41E8) that takes the next Start to leave the list; while the message is up the bit is cleared.
 
 Cheats, for getting past a hard spot (`src/cheats.c`, applied each frame; for the session
 only, never saved, so a new start has them off): Infinite Health (Ryu's health refilled each
@@ -288,9 +300,12 @@ F11 or Alt+Enter toggles fullscreen and
 F10 the FPS counter (frames per second, average and worst frame time over the last half
 second). Compiled shaders are kept in `~/.cache/NinjaGaidenBlack/shaders` (the new renderer's in its
 `d3d` folder: how each shader is made, its SPIR-V and the pipelines), and all of them are made
-again in the background at the next start, before the game needs them; a seed shipped with the
-AppImage (`packaging/d3d-seed.bin`, recorded over the first chapters; the game's vertex programs in
-it are only places in the player's own `default.xbe`) does the same on the very first start. So
+again in the background at the next start, before the game needs them; a seed shipped with every
+package (`packaging/d3d-seed.bin`, recorded over chapters 1 to 13, the Missions and the attract demo; the
+game's vertex programs in it are only places in the player's own `default.xbe`; on Android it is
+`libd3dseed.so` in the APK) does the same on the very first start. It goes stale when the renderer
+changes how a shader's key is made: `tools/check_shader_seed.py` compares it with a test run's cache, and
+`NGB_D3D_SEED_RECORD` records a new one (docs/renderer.md). So
 an effect does not stutter the frame it first appears. The AppImage also carries the pipelines
 recorded while testing (`packaging/shader-seed`), built in the background at startup;
 the game's vertex programs are not in it, only where each is in `default.xbe`, and they are
@@ -402,8 +417,8 @@ emulation still runs the GPU's command stream (the game's fences and vertical bl
 it) but draws nothing; the renderer draws on the same Vulkan device and the same window, so the
 settings and the FPS counter work as before. Render resolution, texture filtering
 and shadow resolution apply to it. It needs Vulkan 1.3's dynamic rendering and synchronization2
-(or those as extensions of an older driver) and push descriptors; without them the game says what is missing
-and ends (#47).
+(or those as extensions of an older driver); without them the game says what is missing and ends (#47).
+Push descriptors are used where the driver has them, else a descriptor set per draw (#159).
 
 `NGB_RENDERER=xemu` draws with xemu's NV2A renderer instead, as before (on Steam:
 `NGB_RENDERER=xemu %command%`). `NGB_RENDERER=mirror` keeps xemu drawing and showing the game

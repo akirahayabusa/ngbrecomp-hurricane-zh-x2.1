@@ -88,7 +88,7 @@ void ngb_menu_set_running(const NgbSettings *s)
  * audio (0 off, 1 the HRTF filters, 2 clear, their levels only; #30, #86), 24 the HUD (src/hud.c, #80), 25 the audio
  * output (0 auto, 1 stereo, 2 5.1; src/audio), 26-28 the main menu's MISSIONS, ARCADE NINJA GAIDEN and
  * MOVIE THEATER unlocked (src/cheats.c, saved), 29 Lower Detail Under Load (src/d3d/d3d.c), 30 the render thread
- * (src/d3d/hle.cpp, the Multithreaded Renderer), 31 unused (upstream's Intercept, #109, left out: x2.1 has its own), 32 all weapons (a cheat), 33 Essence-Only Charging (src/ut_charge.c), 34 Skip Any Cutscene (src/cutscene_skip.c). A change applies at once (8, 9 and 25 at the next start, 30 after a restart) and is saved, the
+ * (src/d3d/hle.cpp, the Multithreaded Renderer), 31 unused (upstream's Intercept, #109, left out: x2.1 has its own), 32 all weapons (a cheat), 33 Essence-Only Charging (src/ut_charge.c), 34 Skip Any Cutscene (src/cutscene_skip.c), 35 unused (the GPU driver was, #151), 36 Responsive Menus (src/responsive.c), 37 all armlets, 38 all technique scrolls and 39 one hit kill (cheats). A change applies at once (8, 9 and 25 at the next start, 30 after a restart) and is saved, the
  * cheats' not. */
 int ngb_cheat(int which);
 void ngb_cheat_set(int which, int on);
@@ -106,8 +106,8 @@ int ngb_pc_setting(int which)
         return ngb_cheat(3);
     if (which == 21 || which == 22)                    /* infinite items, infinite projectiles */
         return ngb_cheat(which - 17);
-    if (which == 32)                                   /* all weapons */
-        return ngb_cheat(6);
+    if (which == 32 || which == 37 || which == 38 || which == 39)   /* all weapons, armlets, scrolls, one hit kill */
+        return ngb_cheat(which == 32 ? 6 : which - 30);
     if (which == 14 || which == 16 || which == 17) {
         ngb_pc_setting(0);
         return which == 14 ? s_running.all_difficulties : which == 16 ? s_running.all_costumes : s_running.movie_43;
@@ -143,7 +143,7 @@ int ngb_pc_setting(int which)
     case 30: return s_running.render_thread;
     case 33: return s_running.essence_charging;
     case 34: return s_running.skip_cutscenes;
-    case 35: return s_running.gpu_driver;
+    case 36: return s_running.responsive_menus;
     case 25: return s_running.audio_output;
     default: return s_running.show_fps;
     }
@@ -151,8 +151,10 @@ int ngb_pc_setting(int which)
 
 void ngb_pc_set_setting(int which, int value)
 {
-    if ((which >= 11 && which <= 13) || which == 15 || which == 21 || which == 22 || which == 32) {
-        ngb_cheat_set(which == 32 ? 6 : which == 15 ? 3 : which >= 21 ? which - 17 : which - 11, value);
+    if ((which >= 11 && which <= 13) || which == 15 || which == 21 || which == 22 || which == 32 || which == 37 ||
+        which == 38 || which == 39) {
+        ngb_cheat_set(which == 32 ? 6 : which >= 37 ? which - 30 : which == 15 ? 3 : which >= 21 ? which - 17 :
+                      which - 11, value);
         return;
     }
     ngb_pc_setting(0);
@@ -182,7 +184,7 @@ void ngb_pc_set_setting(int which, int value)
     case 30: s_running.render_thread = !!value; break;   /* at the next start */
     case 33: s_running.essence_charging = !!value; break;
     case 34: s_running.skip_cutscenes = !!value; break;
-    case 35: s_running.gpu_driver = value < 0 ? 0 : value > 2 ? 2 : value; break;   /* at the next start */
+    case 36: s_running.responsive_menus = !!value; break;
     case 25:   /* the mixer's at the next start; the arcade's at its next */
         s_running.audio_output = value < 0 ? 0 : value > 2 ? 2 : value;
         ngb_audio_set_output(s_running.audio_output);
@@ -1784,19 +1786,19 @@ _Noreturn void ngb_renderer_fatal(const char *detail)
     char msg[2048];   /* Hurricane: in Chinese too (UTF-8), before the English (user 2026-10-18) */
 #ifdef __ANDROID__
     snprintf(msg, sizeof msg,
-             "Ninja Gaiden Black needs a phone GPU whose Vulkan driver has dynamic rendering, "
-             "synchronization2 and push descriptors (Vulkan 1.3, or those as extensions), and this phone's "
+             "Ninja Gaiden Black needs a phone GPU whose Vulkan driver has dynamic rendering and "
+             "synchronization2 (Vulkan 1.3, or those as extensions), and this phone's "
              "does not:\n\n%s\n\n"
              "A system update sometimes brings a newer driver. Please report your phone's model and chip on "
              "the project's GitHub page.", detail);
 #else
     snprintf(msg, sizeof msg,
              "本程序需要显卡驱动支持 Vulkan 1.3 的 dynamic rendering 与 synchronization2"
-             "（Vulkan 1.3 自带，或旧版驱动以扩展提供）以及 push descriptors，"
+             "（Vulkan 1.3 自带，或旧版驱动以扩展提供），"
              "这台电脑不满足：\n\n%s\n\n"
              "请更新显卡驱动。大约 2016 年以前的显卡（例如 Nvidia GTX 600、700 系列）不受支持。\n\n"
              "Ninja Gaiden Black needs a GPU and driver with Vulkan 1.3's dynamic rendering and synchronization2 "
-             "(in Vulkan 1.3, or as extensions of an older one) and push descriptors, and this system does not "
+             "(in Vulkan 1.3, or as extensions of an older one), and this system does not "
              "offer them (see above). "
              "Please update your graphics driver. GPUs from before about 2016 (for example Nvidia's "
              "GTX 600 and 700 series) are not supported.", detail);

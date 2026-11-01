@@ -88,12 +88,11 @@ Expect problems on other phones, and please report them (below).
 Plays with the on-screen touch controls (an Xbox 360 pad), or with any controller the phone supports:
 the touch controls hide while one is connected. Needs Android 10 or newer (13 or newer for full speed:
 the game tells the system how long its frames take, which keeps the CPU clocks up), a GPU with Vulkan
-1.3, or an older Vulkan with its dynamic rendering, synchronization2 and push descriptors as extensions
+1.3, or an older Vulkan with its dynamic rendering and synchronization2 as extensions
 (on Adreno, Turnip has them).
 
 On Adreno GPUs (Snapdragon phones) whose own driver lacks what the game needs, it uses Turnip, Mesa's
-open driver for Adreno, built into the app (RECOMP SETTINGS → Graphics → GPU Driver: Auto, System or
-Turnip).
+open driver for Adreno, built into the app; otherwise the phone's own.
 
 Not there yet on Android: the arcade Ninja Gaiden, and "Return to Main Menu" from the pause menu (it
 closes the game instead).
@@ -144,12 +143,16 @@ of the pause menu. Changes apply at once and are saved.
   and items, and whether the game pauses while it is open; **Intercept** (Black or Hurricane), the Hurricane
   Pack's guard counter Black left out: tap guard as an attack lands to turn it aside; **Essence-Only
   Charging**, Ultimate Techniques charged only by absorbing essence, not by holding attack (#120); **Skip Any
-  Cutscene**, Start skipping movies and in-game cutscenes not yet watched (#139)
-- **Cheats** (for the session only): infinite health, ninpo, essence, items, projectiles; golden scarabs;
-  all weapons (every melee and projectile weapon at its highest level; turned off, it takes back what it
-  gave and puts back your own levels and pickups; a save made while it is on keeps the weapons)
-  Its **Unlocks** page (saved): all difficulties from the start, all costumes, and the main menu's
-  Missions (with every mission), Arcade Ninja Gaiden and Movie Theater without earning them
+  Cutscene**, Start skipping movies and in-game cutscenes not yet watched (#139); **Responsive Menus**, Start
+  taken at once at the title, in a cutscene's opening wait and in the pause menu after equipping, where the game
+  ignores it for a while (#116)
+- **Cheats** (for the session only): infinite health, ninpo, essence, items, projectiles; golden scarabs; one
+  hit kill (any hit that hurts an enemy or a boss kills it).
+  Its **Unlocks** page: all difficulties from the start, all costumes, and the main menu's Missions (with every
+  mission), Arcade Ninja Gaiden and Movie Theater without earning them (saved); All Weapons (every melee and
+  projectile weapon at its highest level), All Armlets (the armlets and bands) and All Scrolls (the Izuna Drop,
+  Counter Attack and Guillotine Throw technique scrolls), for the session: turned off, each takes back what it
+  gave and puts back your own pickups; a save made while one is on keeps what it gave
 - **Controls**: rebind every action (two keys or mouse buttons and a controller button each); camera
   inversion; start in third person; Camera Sensitivity; Toggle HUD (not bound unless chosen). The
   bindings follow the game's own Button Settings: an action keeps its key or button whatever the

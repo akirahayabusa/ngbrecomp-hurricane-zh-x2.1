@@ -82,10 +82,10 @@ enum { S_RENDER, S_TEXTURE, S_SHADOW, S_DISPLAY, S_VSYNC, S_FPS, S_WINDOW, S_ASP
        S_MISSIONS, S_ARCADE, S_MOVIES, S_LOADDETAIL, S_RTHREAD,
        S_UNUSED31,                /* upstream's Intercept (#109), left out: x2.1 has its own; kept so the numbers stay ngb_pc_setting's */
        S_ALLWEAP,
-       S_ESSCHARGE, S_CUTSKIP, S_GPUDRV,   /* (Android only: src/android_gpu.c) */
-       S_UNLOCKS,                 /* not a setting: Cheats' row opening the Unlocks page */
+       S_ESSCHARGE, S_CUTSKIP, S_UNUSED35 /* (the GPU driver was) */, S_RESPONSIVE, S_ALLARM, S_ALLSCROLL,
+       S_ONEHIT, S_UNLOCKS,                 /* not a setting: Cheats' row opening the Unlocks page */
        S_COUNT };
-_Static_assert(S_RTHREAD == 30 && S_ALLWEAP == 32 && S_ESSCHARGE == 33 && S_CUTSKIP == 34 && S_GPUDRV == 35,
+_Static_assert(S_RTHREAD == 30 && S_ALLWEAP == 32 && S_ESSCHARGE == 33 && S_CUTSKIP == 34 && S_RESPONSIVE == 36,
                "the S_ numbers are ngb_pc_setting's (src/ingame_menu.c)");
 
 static const char *const s_label[S_COUNT] = {
@@ -96,8 +96,9 @@ static const char *const s_label[S_COUNT] = {
     "Golden Scarabs", "All Costumes", "Extra Costume", "Smoother Glow", "Quick Menu Pause",
     "Quick Menu", "Infinite Items", "Infinite Projectiles", "Positional Audio", "HUD",
     "Audio Output", "Missions", "Arcade Ninja Gaiden", "Movie Theater", "Lower Detail Under Load",
-    "Multithreaded Renderer", "", "All Weapons", "Essence-Only Charging", "Skip Any Cutscene", "GPU Driver",
-    "Unlocks",
+    "Multithreaded Renderer", "", "All Weapons", "Essence-Only Charging", "Skip Any Cutscene", "",
+    "Responsive Menus", "All Armlets", "All Scrolls",
+    "One Hit Kill", "Unlocks",
 };
 static const char *const s_help[S_COUNT] = {
     "Draws the game at a multiple of the console's resolution.",
@@ -132,11 +133,15 @@ static const char *const s_help[S_COUNT] = {
     "Eases off detail when busy, as on the Xbox; Ryu's shadow may flicker.",
     "Drawing on a thread of its own, for slower CPUs. May have bugs. Needs restart.",
     "",
-    "Every weapon and projectile weapon, at its highest level. Turned off, they are taken back.\nA save made while it is on keeps them.",
+    "Every weapon, at its highest level. Turned off, they are taken back.",
     "Holding attack no longer charges an Ultimate Technique: only absorbing essence does.",
     "Start skips any movie or in-game cutscene, watched before or not. Off: as on the Xbox.",
-    "Turnip: Mesa's driver for Adreno GPUs. Auto uses it only when needed. Needs restart.",
-    "Difficulties, costumes and the main menu's extras, without earning them. Saved.",
+    "",
+    "Start at the title, in a cutscene's opening wait and after equipping in the pause menu works at once.",
+    "Every armlet and band. Turned off, they are taken back.",
+    "The Izuna Drop, Counter Attack and Guillotine Throw scrolls. Turned off, they are taken back.",
+    "Any hit that hurts an enemy or a boss kills it. For this session only.",
+    "Difficulties, costumes and the main menu's extras (saved); weapons, armlets and scrolls (this session).",
 };
 
 /* The categories: the strip's words, their rows. */
@@ -154,17 +159,13 @@ static const char *cat_name(int c)
     return z ? z : s_cat_name[c];
 }
 static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
-#ifdef __ANDROID__   /* (the GPU driver: Adreno phones, src/android_gpu.c) */
-    { S_RENDER, S_TEXTURE, S_MSAA, S_SHADOW, S_GLOW, S_LOADDETAIL, S_RTHREAD, S_GPUDRV, -1 },
-#else
     { S_RENDER, S_TEXTURE, S_MSAA, S_SHADOW, S_GLOW, S_LOADDETAIL, S_RTHREAD, -1 },   /* -1 ends a page shorter than CAT_ROWS */
-#endif
     { S_ASPECT, S_WINDOW, S_DISPLAY, S_VSYNC, S_FPS, S_HUD, S_SKIP, -1 },
     { S_POSAUDIO, S_AUDIOOUT, -1 },
-    { S_QUICKSCALE, S_QUICKFREEZE, S_ESSCHARGE, S_CUTSKIP, -1 },
-    { S_HEALTH, S_NINPO, S_ESSENCE, S_SCARABS, S_INFITEMS, S_INFAMMO, S_ALLWEAP, S_UNLOCKS, -1 },
+    { S_QUICKSCALE, S_QUICKFREEZE, S_ESSCHARGE, S_CUTSKIP, S_RESPONSIVE, -1 },
+    { S_HEALTH, S_NINPO, S_ESSENCE, S_SCARABS, S_INFITEMS, S_INFAMMO, S_ONEHIT, S_UNLOCKS, -1 },
     { -1 },
-    { S_ALLDIFF, S_ALLCOST, S_MISSIONS, S_ARCADE, S_MOVIES, -1 },
+    { S_ALLDIFF, S_ALLCOST, S_MISSIONS, S_ARCADE, S_MOVIES, S_ALLWEAP, S_ALLARM, S_ALLSCROLL, -1 },
 };
 
 #include "bindings.h"
@@ -214,7 +215,6 @@ static void value_text(int row, char *out, size_t n)
     case S_QUICKSCALE: if (v) snprintf(out, n, "%d%%", v); else snprintf(out, n, "Off"); break;
     case S_POSAUDIO: snprintf(out, n, "%s", v == 2 ? "Clear" : v ? "Console" : "Off"); break;
     case S_AUDIOOUT: snprintf(out, n, "%s", v == 2 ? "5.1" : v ? "Stereo" : "Auto"); break;
-    case S_GPUDRV:  snprintf(out, n, "%s", v == 2 ? "Turnip" : v ? "System" : "Auto"); break;
     case S_UNLOCKS: snprintf(out, n, "%s", ""); break;
     case S_SKIP:
     case S_ALLDIFF:
@@ -270,7 +270,6 @@ static void change(int row, int step)
         break;
     case S_POSAUDIO:
     case S_AUDIOOUT:
-    case S_GPUDRV:
         ngb_pc_set_setting(row, (v + (step > 0 ? 1 : 2)) % 3);
         break;
     case S_ASPECT:
@@ -5323,7 +5322,9 @@ void sub_002216B0(void)
     }
     if (!def && (MEM32(p) & 0xFFFF) == 0xC5) {        /* the title's PRESS START BUTTON */
         extern void ngb_title_seen(void);              /* (src/ingame_menu.c: Return to Main Menu) */
+        extern void ngb_responsive_title(void);
         ngb_title_seen();
+        ngb_responsive_title();                        /* (src/responsive.c: Start taken at once) */
     }
     ps_check(MEM32(p) & 0xFFFF);                       /* a PlayStation pad's buttons (#113) */
     hold_check(MEM32(p) & 0xFFFF);                     /* the techniques' "hold" icons too (#125) */
