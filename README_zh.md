@@ -45,15 +45,49 @@
 
 不包含：SFC 忍者龙剑传三部曲（`NinjaFCJ.xbe` / `NinjaFCU.xbe`）。它是另外的程序，没有重编译，主菜单中不显示这一项。
 
+## 发布文件说明
+
+[Releases](../../releases) 页面每个版本都有下面这些文件（`<ver>` 是版本号，例如 `0.9.53`）。全部都需要**你自己的
+vb-zh-x2.1 镜像**（美版原版镜像打上 vb-zh-x2.1 补丁得到的 ISO，或其解压出的文件），都不含游戏数据。
+
+| 文件 | 适用 | 内容 |
+|---|---|---|
+| `NGB_Hurricane_PC_v<ver>_win64.zip` | Windows 10 / 11（64 位） | 程序文件夹：`ngb-hurricane-zh-x2.1.exe`、两个街机程序（`NinjaTrilogy.exe`、`NinjaTomoe.exe`）、DLL、`share/`（着色器预编译数据）、`licenses/`，以及中文说明 `说明.txt` |
+| `NGB_Hurricane_PC_v<ver>_x86_64.AppImage` | Linux（x86-64，glibc 2.35 起：Ubuntu 22.04+、SteamOS、Debian 12、Fedora 36+ 等） | 整个程序打成一个文件，含街机程序 |
+| `NGB_Hurricane_PC_v<ver>_x86_64.AppImage.zsync` | Linux | AppImage 的增量更新数据：用 AppImageUpdate（或支持它的启动器）更新时只下载变化的部分。玩游戏用不到 |
+| `NGB_Hurricane_Android_v<ver>_arm64.apk` | Android 10 起，64 位 ARM 手机 / 平板 | App「NGB Hurricane x2.1」（独立的 App ID，可与上游 App 同时安装）。不含街机版 |
+| `SHA256SUMS.txt` | 全部 | 以上文件的 SHA-256 校验码，用来核对下载是否完整 |
+
+都需要显卡驱动支持 Vulkan 1.3（或以扩展提供 dynamic rendering 与 synchronization2 的旧版 Vulkan）。Linux 版与 Android
+版和 Windows 版是同一份重编译代码；目前只在虚拟机和模拟器里测过，还没有在真实的 Linux 电脑和手机上测试，欢迎反馈。
+
+核对下载：Windows 用 `certutil -hashfile <文件> SHA256`（或 PowerShell 的 `Get-FileHash <文件>`），Linux 用
+`sha256sum -c SHA256SUMS.txt --ignore-missing`；结果要与 `SHA256SUMS.txt` 里该文件那一行相同。
+
 ## 使用方法（Windows）
 
-1. 从 [Releases](../../releases) 下载 zip，解压到任意位置。
+1. 从 [Releases](../../releases) 下载 `NGB_Hurricane_PC_v<ver>_win64.zip`，解压到任意位置。
 2. 运行 `ngb-hurricane-zh-x2.1.exe`，选择 vb-zh-x2.1 镜像（`.iso`）或其解压出的文件夹。
    镜像只需安装一次（约 6 GB），默认装到 `%LOCALAPPDATA%\ngb-hurricane-zh-x2.1`；
    便携模式（勾选对话框里的选项，或在 exe 旁放一个 `portable.txt`）则全部放在程序旁边。
 
 需要 Windows 10 / 11（64 位）和支持 Vulkan 1.3 的显卡（或以扩展提供 dynamic rendering 与 synchronization2 的旧版驱动）。按键：F1 游戏中的设置，F10 帧率显示，F11 或 Alt+Enter 全屏。
 存档与 Xbox / xemu 的存档分开。数据文件夹（`%LOCALAPPDATA%`、`%APPDATA%` 下的 `ngb-hurricane-zh-x2.1`）独立，可与 ngbrecomp 原版共存。
+
+## 使用方法（Linux）
+
+1. 下载 `.AppImage`，加上执行权限（`chmod +x NGB_Hurricane_PC_v<ver>_x86_64.AppImage`，或在文件管理器里勾选“允许执行”）后运行。
+2. 第一次启动会要求选择 vb-zh-x2.1 镜像（`.iso`）或其解压出的文件夹，游戏只安装一次（约 6 GB），装到
+   `~/.local/share/ngb-hurricane-zh-x2.1`，存档也在那里；设置在 `~/.config/ngb-hurricane-zh-x2.1`。
+3. 更新：对这个文件运行 AppImageUpdate（会用到 `.zsync`），或直接下载新的 AppImage。
+
+## 使用方法（Android）
+
+1. 把 `.apk` 拷到手机上打开安装；Android 询问时允许浏览器或文件管理器安装应用。
+2. 把 vb-zh-x2.1 镜像（`.iso`）拷到手机上；`.7z` / `.zip` 要先解压。
+3. 打开「NGB Hurricane x2.1」，在系统的文件选择器里选中镜像，游戏只安装一次（约 6 GB，可装在手机或 SD 卡），装好后可删除镜像。
+4. 可用屏幕触控按键或手机支持的手柄游玩。存档、设置与 `log.txt` 在 `Android/data/io.github.akirahayabusa.ngbhurricane/files`。
+   骁龙（Adreno）手机若自带驱动缺少所需功能，会自动改用内置的 Turnip 驱动。Android 版没有街机版；暂停菜单的“返回主菜单”会关闭 App。
 
 ## 版本号
 
@@ -99,6 +133,9 @@ ninja -C build/x21 ninja_gaiden_black
 
 `default.xbe` 取自你的 vb-zh-x2.1 镜像。生成的中文数据（`src/hurricane_zh_data.c`、`assets/fonts/NGBHanzi-Bold.ttf`）
 已提交；重新生成需要汉化项目的码表与字形渲染工具。
+
+Linux 版 AppImage 与 Android 版 APK 在可携式 Ubuntu 22.04 虚拟机里用同一份生成代码编译，见
+[tools/hurricane/linux_android/README.md](tools/hurricane/linux_android/README.md)。
 
 ## 作者与授权
 

@@ -1797,9 +1797,12 @@ _Noreturn void ngb_renderer_fatal(const char *detail)
     char msg[2048];   /* Hurricane: in Chinese too (UTF-8), before the English (user 2026-10-18) */
 #ifdef __ANDROID__
     snprintf(msg, sizeof msg,
+             "本程序需要手机显卡的 Vulkan 驱动支持 dynamic rendering 与 synchronization2"
+             "（Vulkan 1.3 自带，或以扩展提供），这台手机不满足：\n\n%s\n\n"
+             "系统更新有时会带来新驱动。也欢迎到项目的 GitHub 页面报告手机型号与芯片。\n\n"
              "Ninja Gaiden Black needs a phone GPU whose Vulkan driver has dynamic rendering and "
              "synchronization2 (Vulkan 1.3, or those as extensions), and this phone's "
-             "does not:\n\n%s\n\n"
+             "does not (see above). "
              "A system update sometimes brings a newer driver. Please report your phone's model and chip on "
              "the project's GitHub page.", detail);
 #else

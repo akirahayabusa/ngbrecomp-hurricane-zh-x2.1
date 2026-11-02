@@ -113,11 +113,13 @@ static int ask(const char *title, const char *text, const char **buttons, int n)
 int ngb_android_pick_disc(char *out, size_t n)
 {
     for (;;) {
-        static const char *b[] = { "Choose file...", "Quit" };
-        if (ask("Ninja Gaiden Black",
-                "To install the game, choose your Ninja Gaiden Black disc image (.iso, from the retail USA disc). "
-                "A .7z or .zip has to be unpacked first. The game takes about 6 GB; the image can be deleted "
-                "afterwards.", b, 2) != 0)
+        static const char *b[] = { "选择文件 / Choose file...", "退出 / Quit" };
+        if (ask("NGB Hurricane x2.1",   /* Hurricane x2.1: its image, in Chinese too (user 2026-11-03) */
+                "安装游戏：请选择「忍者龙剑传 黑之章 飓风版[中英] vb-zh-x2.1」镜像（.iso，美版原版镜像打上 vb-zh-x2.1 补丁）。"
+                ".7z / .zip 要先解压。游戏约占 6 GB，装好后可删除镜像。\n\n"
+                "To install the game, choose your vb-zh-x2.1 disc image (.iso: the retail USA image with the "
+                "vb-zh-x2.1 patch). A .7z or .zip has to be unpacked first. The game takes about 6 GB; the image "
+                "can be deleted afterwards.", b, 2) != 0)
             return 0;
         if (pick_file(out, n))
             return 1;
@@ -132,7 +134,7 @@ static void toast_progress(uint64_t done, uint64_t total, void *ud)
     int pct = (int)(done * 100 / total);
     if (pct / 10 != *last / 10) {   /* (a note every tenth: each stays a couple of seconds) */
         char msg[96];
-        snprintf(msg, sizeof msg, "Installing Ninja Gaiden Black: %d%%", pct);
+        snprintf(msg, sizeof msg, "正在安装 / Installing: %d%%", pct);
         SDL_AndroidShowToast(msg, 0, -1, 0, 0);
         *last = pct;
     }
@@ -158,15 +160,17 @@ int ngb_android_install(const char *src, const char *installed, char *out, size_
         char *slash = strrchr(phone_dir, '/');
         if (slash)
             *slash = 0;
-        snprintf(phone, sizeof phone, "Phone (%.1f GB free)", free_gb(phone_dir));
-        snprintf(card, sizeof card, "SD card (%.1f GB free)", free_gb(sd));
-        const char *b[] = { phone, card, "Quit" };
-        int hit = ask("Ninja Gaiden Black", "Where should the game go? It takes about 6 GB.", b, 3);
+        snprintf(phone, sizeof phone, "手机 / Phone (%.1f GB)", free_gb(phone_dir));
+        snprintf(card, sizeof card, "SD 卡 / SD card (%.1f GB)", free_gb(sd));
+        const char *b[] = { phone, card, "退出 / Quit" };
+        int hit = ask("NGB Hurricane x2.1", "游戏装在哪里？约占 6 GB（括号内为剩余空间）。\n\nWhere should the game go? It takes about 6 GB "
+                      "(free space in brackets).", b, 3);
         if (hit < 0 || hit > 1)
             return -2;
         if (free_gb(hit ? sd : phone_dir) < 6.5) {
-            static const char *ok[] = { "Choose again" };
-            ask("Ninja Gaiden Black", "There is not enough free space there: the game needs about 6.5 GB.", ok, 1);
+            static const char *ok[] = { "重新选择 / Choose again" };
+            ask("NGB Hurricane x2.1", "那里空间不足：游戏需要约 6.5 GB。\n\nThere is not enough free space there: the game needs "
+                "about 6.5 GB.", ok, 1);
             continue;
         }
         if (hit == 1) {
@@ -176,16 +180,16 @@ int ngb_android_install(const char *src, const char *installed, char *out, size_
         break;
     }
     int last = -10;
-    SDL_AndroidShowToast("Installing Ninja Gaiden Black: a few minutes", 1, -1, 0, 0);
+    SDL_AndroidShowToast("正在安装游戏，需要几分钟 / Installing the game: a few minutes", 1, -1, 0, 0);
     ngb_install_set_progress(toast_progress, &last);
     int rc = ngb_install(src, installed, out, n);
     ngb_install_set_progress(NULL, NULL);
     if (rc != 0) {
         char msg[1400];
-        snprintf(msg, sizeof msg, "The game could not be installed.\n\n%s", ngb_install_error());
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Ninja Gaiden Black", msg, NULL);
+        snprintf(msg, sizeof msg, "游戏没能安装 / The game could not be installed.\n\n%s", ngb_install_error());
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "NGB Hurricane x2.1", msg, NULL);
     } else {
-        SDL_AndroidShowToast("Installed. You can delete the disc image now if you like.", 1, -1, 0, 0);
+        SDL_AndroidShowToast("安装完成，现在可以删除镜像 / Installed. You can delete the disc image now if you like.", 1, -1, 0, 0);
     }
     if (!strncmp(src, "/proc/self/fd/", 14))   /* (the picker's descriptor, given to us) */
         close(atoi(src + 14));
@@ -196,9 +200,10 @@ int ngb_android_install(const char *src, const char *installed, char *out, size_
 int ngb_android_missing_card(const char *where)
 {
     char msg[1400];
-    snprintf(msg, sizeof msg, "The game was installed on an SD card that is not in the phone now:\n%s\n\nPut the card "
-             "back and press Look again, or install the game again.", where);
-    static const char *b[] = { "Look again", "Install again", "Quit" };
-    int hit = ask("Ninja Gaiden Black", msg, b, 3);
+    snprintf(msg, sizeof msg, "游戏装在一张现在不在手机里的 SD 卡上：\n%s\n\n请插回 SD 卡后按「再找一次」，或重新安装。\n\n"
+             "The game was installed on an SD card that is not in the phone now. Put the card back and press "
+             "Look again, or install the game again.", where);
+    static const char *b[] = { "再找一次 / Look again", "重新安装 / Install again", "退出 / Quit" };
+    int hit = ask("NGB Hurricane x2.1", msg, b, 3);
     return hit == 0 ? 1 : hit == 1 ? 0 : -1;
 }
