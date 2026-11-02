@@ -244,7 +244,8 @@ cat	Controls	按键	P
 	Multithreaded Renderer	多线程渲染	E
 	Drawing on a thread of its own, for slower CPUs. May have bugs. Needs restart.	在独立线程中绘制画面，适合性能低的CPU。可能有问题，重启游戏后生效	E
 	Clear	清晰	E
-	Sounds placed left and right. Clear: by level only. Console: as the Xbox on speakers, duller.	把声音分到左右。清晰：只按音量定位。主机原版：与Xbox接音箱时相同，声音不够清晰	E
+	Sounds placed left and right. Clear: by level only. Console: as the Xbox, duller. Mixed: between the two.	把声音分到左右。清晰：只按音量定位。主机原版：与Xbox相同，声音不够清晰。混合：在两者之间	E
+	Mixed	混合	E
 	Speakers. Auto: 5.1 when the output device has 5.1 or 7.1 channels, else stereo. Needs a restart of the game.	自动：输出设备有5.1或7.1声道时用5.1，否则用立体声。重启游戏后生效	E
 	All Weapons	全部武器	E
 	Essence-Only Charging	只用精魂蓄力	E

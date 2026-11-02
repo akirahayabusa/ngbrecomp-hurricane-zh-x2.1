@@ -15,6 +15,28 @@ resolutions, widescreen and ultrawide, keyboard and mouse, rebindable controls a
 sound, movies, text): on first start it asks for your disc image and installs the game from it. It is made for the **retail USA
 release** (NTSC-U, title ID `5443000D`) and checks for it.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/e9fb1579-2320-4ff9-8fc0-0ea2a724316b" alt="Ultrawide 21:9: Ryu in front of Han's Bar"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>21:9 at 6x render resolution</sub></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/6dc8bc0d-c5c7-418d-9432-184055bbe3e1" alt="Chapter 1"></td>
+    <td><img src="https://github.com/user-attachments/assets/c4944721-b04b-4061-a42f-dbff16fbd29b" alt="A fight, the HUD hidden"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>16:9 at 6x render resolution</sub></td>
+    <td align="center"><sub>HUD hidden</sub></td>
+  </tr>
+</table>
+
 ## Features
 
 - Native Linux (AppImage) and Windows (x64) builds; Steam Deck friendly
@@ -129,6 +151,13 @@ checkbox. The folder must be writable, so not inside Program Files. Delete `port
 Everything is in the game's own menus: **RECOMP SETTINGS** on the main menu, and the **Settings** tab
 of the pause menu. Changes apply at once and are saved.
 
+<table>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/69f8a3fa-1aa2-42b0-b35a-c7531ff931d7" alt="RECOMP SETTINGS: Graphics"></td>
+    <td><img src="https://github.com/user-attachments/assets/dc1825e8-dbb7-4d00-a62b-990af3bfac53" alt="RECOMP SETTINGS: Gameplay"></td>
+  </tr>
+</table>
+
 - **Graphics**: render resolution (1x–10x), texture filtering (the console's, or 2x–16x
   anisotropic), anti-aliasing (MSAA), shadow resolution, Smoother Glow (a softer, fainter glow on
   bright lights; off is the console's look), Lower Detail Under Load, Multithreaded Renderer (drawing on a
@@ -136,8 +165,9 @@ of the pause menu. Changes apply at once and are saved.
 - **Display**: aspect ratio (4:3, 16:9, 16:10, 21:9, 32:9), window size, windowed / fullscreen /
   borderless, V-Sync (Off, Mailbox, FIFO, Adaptive), frame-rate counter, the HUD on or off, skip the
   warnings and intro movies
-- **Sound**: Positional Audio (3D sounds placed left and right: Clear, the default, by level only;
-  Console, through the sound chip's filters as on the Xbox, duller; Off, centred), Audio Output (Auto, Stereo
+- **Sound**: Positional Audio (3D sounds placed left and right: Mixed, the default, half the sound chip's
+  filters and half panned by direction, the easiest to place; Clear, by level only; Console, through the sound
+  chip's filters as on the Xbox, duller; Off, centred), Audio Output (Auto, Stereo
   or 5.1; Auto is 5.1 on a 5.1 or 7.1 output; a change needs a restart of the game)
 - **Gameplay** (each off unless chosen): the Quick Menu, an NG2-style d-pad menu for weapons, Ninpo
   and items, and whether the game pauses while it is open; **Intercept** (Black or Hurricane), the Hurricane
@@ -151,8 +181,9 @@ of the pause menu. Changes apply at once and are saved.
   Its **Unlocks** page: all difficulties from the start, all costumes, and the main menu's Missions (with every
   mission), Arcade Ninja Gaiden and Movie Theater without earning them (saved); All Weapons (every melee and
   projectile weapon at its highest level), All Armlets (the armlets and bands) and All Scrolls (the Izuna Drop,
-  Counter Attack and Guillotine Throw technique scrolls), for the session: turned off, each takes back what it
-  gave and puts back your own pickups; a save made while one is on keeps what it gave
+  Counter Attack and Guillotine Throw technique scrolls; the story's own can still be picked up while it is on),
+  for the session: turned off, each takes back what it gave and puts back your own pickups; a save made while one
+  is on keeps what it gave
 - **Controls**: rebind every action (two keys or mouse buttons and a controller button each); camera
   inversion; start in third person; Camera Sensitivity; Toggle HUD (not bound unless chosen). The
   bindings follow the game's own Button Settings: an action keeps its key or button whatever the
