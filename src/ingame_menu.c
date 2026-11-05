@@ -1794,7 +1794,11 @@ bool nv2a_overlay_frame(uint32_t *px, int w, int h, const uint32_t *backdrop)
  * game far slower than the player had any way to know why (#47). */
 _Noreturn void ngb_renderer_fatal(const char *detail)
 {
+    static int once;
     char msg[2048];   /* Hurricane: in Chinese too (UTF-8), before the English (user 2026-10-18) */
+    if (__atomic_exchange_n(&once, 1, __ATOMIC_ACQ_REL))
+        for (;;)
+            SDL_Delay(1000);                       /* (the other renderer's message is up: it ends the game) */
 #ifdef __ANDROID__
     snprintf(msg, sizeof msg,
              "本程序需要手机显卡的 Vulkan 驱动支持 dynamic rendering 与 synchronization2"
@@ -1820,5 +1824,9 @@ _Noreturn void ngb_renderer_fatal(const char *detail)
     fprintf(stderr, "[D3D] %s\n", msg);
     fflush(stderr);
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Ninja Gaiden Black", msg, NULL);
-    exit(1);
+    fflush(NULL);   /* (the log: stdout is a file on Windows, fully buffered) */
+    _exit(1);   /* (not exit: the other threads are still running, and its teardown under them crashed, #192) */
 }
+
+/* xboxrecomp's NV2A model (its renderer could not start): the same message */
+void nv2a_renderer_fatal(const char *detail) { ngb_renderer_fatal(detail); }

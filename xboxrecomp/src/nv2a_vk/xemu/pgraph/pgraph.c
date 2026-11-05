@@ -28,6 +28,7 @@
 #include "swizzle.h"
 #include "nv2a_vsh_emulator.h"
 #include "nv2a_vk_share.h"   /* nv2a_vk_draws_off */
+void nv2a_renderer_fatal(const char *detail);   /* xboxrecomp: below */
 
 #define PG_GET_MASK(reg, mask) GET_MASK(pgraph_reg_r(pg, reg), mask)
 #define PG_SET_MASK(reg, mask, value)        \
@@ -96,6 +97,7 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         pg->pending_interrupts &= ~val;
 
         if (!(pg->pending_interrupts & NV_PGRAPH_INTR_ERROR)) {
+            { extern int nv2a_pace_on; extern void nv2a_pace_nop(int begin); if (nv2a_pace_on > 0 && pg->waiting_for_nop) nv2a_pace_nop(0); }
             pg->waiting_for_nop = false;
         }
         if (!(pg->pending_interrupts & NV_PGRAPH_INTR_CONTEXT_SWITCH)) {
@@ -115,6 +117,7 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
                         % PG_GET_MASK(NV_PGRAPH_SURFACE,
                                    NV_PGRAPH_SURFACE_MODULO_3D) );
             nv2a_profile_increment();
+            { extern int nv2a_pace_on; extern void nv2a_pace_release(void); if (nv2a_pace_on > 0) nv2a_pace_release(); }
             pfifo_kick(d);
         }
         break;
@@ -336,6 +339,14 @@ static void init_renderer(PGRAPHState *pg)
     // FIXME: Try others
 
     fprintf(stderr, "Fatal error: cannot initialize renderer\n");
+    nv2a_renderer_fatal("No Vulkan device could be used.");
+}
+
+/* xboxrecomp: a title's own message (and its way out, one thread's only: an exit() here, on the renderer's
+ * thread, tore down what the others were still using); else just the exit */
+__attribute__((weak)) void nv2a_renderer_fatal(const char *detail)
+{
+    (void)detail;
     exit(1);
 }
 
@@ -960,6 +971,7 @@ DEF_METHOD(NV097, NO_OPERATION)
                  NV_PGRAPH_NSOURCE_NOTIFICATION); /* TODO: check this */
     pg->pending_interrupts |= NV_PGRAPH_INTR_ERROR;
     pg->waiting_for_nop = true;
+    { extern int nv2a_pace_on; extern void nv2a_pace_nop(int begin); if (nv2a_pace_on > 0) nv2a_pace_nop(1); }
 
     qemu_mutex_unlock(&pg->lock);
     bql_lock();

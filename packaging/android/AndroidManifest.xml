@@ -2,8 +2,8 @@
 <!-- Ninja Gaiden Black (static recompilation) for Android, the Hurricane x2.1 build (its own app ID, user 2026-11-03: beside upstream's app; the activity is upstream's class): SDL's activity running libmain.so (packaging/android/build.sh) -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.akirahayabusa.ngbhurricane"
-    android:versionCode="953"
-    android:versionName="0.9.53">
+    android:versionCode="957"
+    android:versionName="0.9.57">
 
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="35" />
     <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true" />

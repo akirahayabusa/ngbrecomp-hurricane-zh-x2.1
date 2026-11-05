@@ -15,6 +15,7 @@
 #include <mutex>
 #include <unordered_map>
 
+#define D3D_FUNCS_TABLE   // (the names and stack sizes: NGB_D3D_TAKE)
 #include "d3d_funcs.h"
 #include "gpu/backend.h"
 #include "gpu/state.h"
@@ -606,11 +607,57 @@ void Start() {
     std::fprintf(stderr, "[D3D] renderer on (%s)\n", g_mirror ? "mirroring the NV2A emulation" : "drawing to the window");
 }
 
+// Calls that end here, their library body skipped (stage B): what the body would add to the push buffer only feeds
+// the NV2A emulation, which draws nothing while this renderer draws. Both below by default since 0.9.57 (8% less
+// CPU on a desktop, the pictures as they were in five chapters and the shaders' scenes); NGB_D3D_TAKE=name,name...
+// only those, NGB_D3D_TAKE=none none.
+// Only these can be taken, each checked in the library's code: its arguments' bytes (its ret n), and why
+// skipping it leaves nothing the title or the rest of the library reads
+struct Takeable { int fn; uint32_t ret; };
+constexpr Takeable kTakeable[] = {
+    {D3DF_CDevice_SetStateVB, 8},              // the lazy state flush (sub_003D1E60) and the vertex arrays: methods only
+    // (not SetStateUP: it also works out the size of DrawVerticesUP's vertices, device +0xBCC/+0xBD0, for its copy)
+    {D3DF_D3DDevice_SetRenderState_Simple, 0}, // two words into the push buffer (the inlined caller keeps the state)
+    // (not SetLight and LightEnable: the title reads the device's light table itself, sub_0019E150, for the
+    // vertex shader constants of what it lights by hand)
+};
+uint32_t g_take_ret[D3DF_COUNT];
+bool g_take[D3DF_COUNT];
+
+void TakeInit() {
+    const char* e = std::getenv("NGB_D3D_TAKE");
+    if (!e) e = "CDevice_SetStateVB,D3DDevice_SetRenderState_Simple";
+    // (the Multithreaded Renderer too: the library's resource stamps, which its waits read, are SetTexture's,
+    // SetPalette's and SetStreamSource's, and the fences SetFence's and the draws'; none of them taken)
+    // (nor while the NV2A emulation draws too, unseen, for a comparison: it needs every method)
+    if (g_mirror || std::getenv("NGB_D3D_KEEP_NV2A") || !std::strcmp(e, "none")) return;
+    for (const Takeable& t : kTakeable) {
+        const char* n = d3d_funcs[t.fn].name;
+        size_t len = std::strlen(n);
+        for (const char* p = e; (p = std::strstr(p, n)); p += len)
+            if ((p == e || p[-1] == ',') && (p[len] == ',' || !p[len])) {
+                g_take[t.fn] = true;
+                g_take_ret[t.fn] = t.ret;
+                std::fprintf(stderr, "[D3D] taking %s\n", n);
+                break;
+            }
+    }
+}
+
 }  // namespace
 
 extern "C" int d3d_hle_call(int fn, uint32_t regs[8]) {
-    if (!g_started) Start();
-    return Before(fn, Call{regs}) ? 1 : 0;
+    if (!g_started) {
+        Start();
+        if (g_started) TakeInit();
+    }
+    bool took = Before(fn, Call{regs});
+    if (!took && unsigned(fn) < D3DF_COUNT && g_take[fn]) {
+        regs[EAX] = 0;
+        regs[ESP] += 4 + g_take_ret[fn];   // its ret n
+        took = true;
+    }
+    return took ? 1 : 0;
 }
 
 // after the Swap hook, out of g_lock and the host section (src/d3d/d3d.c): the frame wait (gpu::Backend::FrameWait).

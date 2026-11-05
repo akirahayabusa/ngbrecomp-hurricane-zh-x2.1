@@ -168,8 +168,6 @@ static void movie_read_hook(const char *host_path, uint64_t off, size_t len)
 /* RECOMP_TLS is not optional: the runtime defines these thread-local, and a
  * plain extern would resolve to the TLS template rather than this thread's
  * copy, so the guest would start with every register at zero. */
-extern RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_esp;
-extern RECOMP_TLS uint32_t g_ebx, g_esi, g_edi;
 extern ptrdiff_t g_xbox_mem_offset;
 
 #define NGB_ENTRY_POINT 0x0032B385u
@@ -1375,8 +1373,11 @@ int main(int argc, char **argv)
     }
     /* Controllers and keyboard, on the thread that pumps the window's
      * events (hotplug arrives there too). */
-    if (s_use_gpu && !s_headless)
+    if (s_use_gpu && !s_headless) {
+        extern void ngb_bind_load(void);
+        ngb_bind_load();   /* (the Nintendo pads' layout: the controllers start with it, src/bindings.c) */
         xbox_InputInit();
+    }
 #endif
 
 #if defined(_WIN32)

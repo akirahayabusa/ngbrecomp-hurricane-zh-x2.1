@@ -138,6 +138,9 @@ cat	Controls	按键	P
 	R Stick	右摇杆	P
 	L Stick	左摇杆	P
 	Press the controller's button (wait to cancel).	请按下控制器按键（稍等即取消）	P
+	Press 1 or 2	请按 1 或 2 个键	P
+	Press a button, or two together for a pair (wait to cancel).	请按下一个按键，或同时按两个键设为组合（稍等即取消）	P
+	B: change   Y / Delete: clear   (play only; the menus keep theirs)	B：更改　Y / Delete：清除（仅限游戏操作，菜单按键不变）	P
 	Press a key or mouse button (Esc cancels).	请按下键盘或鼠标按键（Esc 取消）	P
 	Every action as it was.	所有操作恢复为默认按键	P
 	A: change   X / Delete: clear   (play only; the menus keep theirs)	A：更改　X / Delete：清除（仅限游戏操作，菜单按键不变）	P
