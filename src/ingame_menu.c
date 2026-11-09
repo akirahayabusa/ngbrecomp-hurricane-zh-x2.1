@@ -314,8 +314,7 @@ static int f1_menu(void)
 {
     static int on = -1;
     if (on < 0) {
-        on = getenv("NGB_F1_MENU") != NULL;
-        usb_gamepad_back_start_host = on;   /* else Start+Back is the game's soft reset (#38) */
+        on = getenv("NGB_F1_MENU") != NULL;   /* (and Start under Back the host's: src/bindings.c) */
     }
     return on;
 }
@@ -1789,14 +1788,23 @@ bool nv2a_overlay_frame(uint32_t *px, int w, int h, const uint32_t *backdrop)
     return s_open;
 }
 
+static int s_fatal_up;
+static _Thread_local int t_fatal_mine;
+
+/* The message is up on another thread (src/main.c: a crash meanwhile waits for it, #196) */
+int ngb_renderer_fatal_elsewhere(void)
+{
+    return __atomic_load_n(&s_fatal_up, __ATOMIC_ACQUIRE) && !t_fatal_mine;
+}
+
 /* The renderer cannot run on this system (src/d3d): said in a message box, then the program ends. xemu's
  * GPU model drawing instead (NGB_RENDERER=xemu) is for debugging only -- as a silent fallback it ran the
  * game far slower than the player had any way to know why (#47). */
 _Noreturn void ngb_renderer_fatal(const char *detail)
 {
-    static int once;
     char msg[2048];   /* Hurricane: in Chinese too (UTF-8), before the English (user 2026-10-18) */
-    if (__atomic_exchange_n(&once, 1, __ATOMIC_ACQ_REL))
+    t_fatal_mine = 1;
+    if (__atomic_exchange_n(&s_fatal_up, 1, __ATOMIC_ACQ_REL))
         for (;;)
             SDL_Delay(1000);                       /* (the other renderer's message is up: it ends the game) */
 #ifdef __ANDROID__

@@ -172,19 +172,25 @@ static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
 #include "input/xinput_xbox.h"   /* (XBOX_BUTTON_*: the buttons the prompts picture) */
 /* Hurricane: no Invert Camera / Invert First-Person / Start in Third Person rows -- x2.1 has its own camera option
  * (控制器设置 > 视角设定, localization docs/18) and starts every load in the third-person camera, which these would
- * invert or change again (user 2026-10-17, 2026-10-22): the actions, Camera Sensitivity (#67), Button Prompts (#113), Default Controls */
-#define CTL_INVX (-2)
+ * invert or change again (user 2026-10-17, 2026-10-22). Upstream's Start+Back Reset (#195) is kept (user 2026-11-09):
+ * the actions, Start+Back Reset, Camera Sensitivity (#67), Button Prompts (#113), Default Controls. The toggle
+ * tables keep upstream's indexes (Start+Back Reset is the fifth). */
+#define CTL_INVX (A_COUNT - 4)
 #define CTL_INVY (-3)
 #define CTL_START (-5)
-#define CTL_MOUSE A_COUNT         /* Camera Sensitivity: a value, Left / Right (#67) */
-#define CTL_PROMPTS (A_COUNT + 1) /* Button Prompts: Auto, Xbox, PlayStation, Nintendo, PC (#113, #170) */
-#define CTL_DEF  (A_COUNT + 2)
-#define CTL_ROWS (A_COUNT + 3)
-#define CTL_TOGGLE(r) ((void)(r), 0)
-static const char *const s_ctl_toggle_name[4] = { "", "", "", "" };
-static const char *const s_ctl_toggle_help[4] = { "", "", "", "" };
-static int ctl_toggle_get(int r) { (void)r; return 0; }
-static void ctl_toggle_flip(int r) { (void)r; }
+#define CTL_RESET A_COUNT         /* Start+Back Reset (#195) */
+#define CTL_MOUSE (A_COUNT + 1)   /* Camera Sensitivity: a value, Left / Right (#67) */
+#define CTL_PROMPTS (A_COUNT + 2) /* Button Prompts: Auto, Xbox, PlayStation, Nintendo, PC (#113, #170) */
+#define CTL_DEF  (A_COUNT + 3)
+#define CTL_ROWS (A_COUNT + 4)
+#define CTL_TOGGLE(r) ((r) == CTL_RESET)
+static const char *const s_ctl_toggle_name[5] = { "", "", "", "", "Start+Back Reset" };
+static const char *const s_ctl_toggle_help[5] = {
+    "", "", "", "",
+    "Holding Start and Back (Select) goes back to the title screen. Off: the game ignores it.",
+};
+static int ctl_toggle_get(int r) { (void)r; return ngb_bind_soft_reset(); }
+static void ctl_toggle_flip(int r) { (void)r; ngb_bind_set_soft_reset(!ngb_bind_soft_reset()); }
 
 static int cat_count(int c)
 {

@@ -56,7 +56,7 @@ recompiled; its main-menu entry is not shown.
 
 ## Release files
 
-Each release on the [Releases](../../releases) page has these files (`<ver>` is the version, e.g. `0.9.57`). All of
+Each release on the [Releases](../../releases) page has these files (`<ver>` is the version, e.g. `0.9.58`). All of
 them need **your own vb-zh-x2.1 disc image** (the retail USA image with the vb-zh-x2.1 patch, or its extracted
 files); none of them holds game data.
 
@@ -110,7 +110,7 @@ F10 frame-rate counter, F11 or Alt+Enter fullscreen. Saves are separate from Xbo
 ## Versions
 
 Releases follow the ngbrecomp version they are based on (`hurricane-v0.9.9` = ngbrecomp 0.9.9); our own
-updates on top of one add `-1`, `-2`, ... The window title shows it: `Ninja Gaiden Black Hurricane_x2.1_v0.9.57`.
+updates on top of one add `-1`, `-2`, ... The window title shows it: `Ninja Gaiden Black Hurricane_x2.1_v0.9.58`.
 
 ## Changes from ngbrecomp
 

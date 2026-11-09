@@ -238,7 +238,8 @@ flips the stick and mouse for the third-person camera, **Invert First-Person X**
 right; first-person up and down is the game's own Options → Controller Settings → 1st Person Camera
 Control. **Camera Sensitivity** (25%–300%) sets how fast the mouse, the right stick and the camera keys
 turn it; over 100% the camera turns faster than the game's own top speed (the third-person camera's
-left and right; its up and down stays the game's).
+left and right; its up and down stays the game's). Holding Start and Back (Select) is the game's own reset to
+the title screen; turn off **Start+Back Reset** (Controls) if another program uses that combination.
 
 With the **Quick Menu** on (RECOMP SETTINGS → Gameplay), Up and Down on the d-pad (or the Up / Down
 arrows, 1 / 2) open it on the melee weapons or the items, and Left and Right on the previous or next
@@ -320,6 +321,10 @@ dependency prefix (default: `brew --prefix`).
 How it works, and the details of every feature: [docs/TECHNICAL.md](docs/TECHNICAL.md) and
 [docs/renderer.md](docs/renderer.md). How to contribute: [CONTRIBUTING.md](CONTRIBUTING.md); the layout, tools
 and test rules, also for coding agents: [AGENTS.md](AGENTS.md).
+
+## Support
+
+If you'd like to support the project: [GitHub Sponsors](https://github.com/sponsors/gamboozino) or [ko-fi.com/gamboozino](https://ko-fi.com/gamboozino)
 
 ## Credits
 

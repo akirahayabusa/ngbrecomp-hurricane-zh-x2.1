@@ -47,7 +47,7 @@
 
 ## 发布文件说明
 
-[Releases](../../releases) 页面每个版本都有下面这些文件（`<ver>` 是版本号，例如 `0.9.57`）。全部都需要**你自己的
+[Releases](../../releases) 页面每个版本都有下面这些文件（`<ver>` 是版本号，例如 `0.9.58`）。全部都需要**你自己的
 vb-zh-x2.1 镜像**（美版原版镜像打上 vb-zh-x2.1 补丁得到的 ISO，或其解压出的文件），都不含游戏数据。
 
 | 文件 | 适用 | 内容 |
@@ -92,7 +92,7 @@ vb-zh-x2.1 镜像**（美版原版镜像打上 vb-zh-x2.1 补丁得到的 ISO，
 ## 版本号
 
 发布版本与所基于的 ngbrecomp 版本一致（`hurricane-v0.9.9` 即基于 ngbrecomp 0.9.9）；在同一版本上我们自己的更新加 `-1`、`-2`……
-窗口标题会显示版本：`Ninja Gaiden Black Hurricane_x2.1_v0.9.57`。
+窗口标题会显示版本：`Ninja Gaiden Black Hurricane_x2.1_v0.9.58`。
 
 ## 与 ngbrecomp 的区别
 
