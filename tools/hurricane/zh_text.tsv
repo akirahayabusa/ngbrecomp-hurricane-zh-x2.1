@@ -4,10 +4,10 @@ ctx	en	zh	use
 # src/main_menu.c: encoded with x2.1's charmap, every character must be in it), P = our own drawing only (embedded font).
 # Terms follow the x2.1 glossary (精魂, 忍法, 黄金圣甲虫, 服装, 风驱, 强攻击, 防御, 飞行道具, 业力, 开/关, 是/否).
 # --- main menu (src/main_menu.c)
-	RECOMP SETTINGS	PC版设置	E
+	RECOMP SETTINGS	重编设置	E
 	EXIT TO DESKTOP	退出到桌面	E
 # --- RECOMP SETTINGS and Screen Settings pages, the game's own menu (src/pc_menu.c)
-	PC Settings	PC版设置	E
+	PC Settings	重编设置	E
 	Render Resolution	渲染分辨率	E
 	Anisotropic Filtering	纹理过滤	E
 	Anti-Aliasing (MSAA)	抗锯齿	E
@@ -29,7 +29,7 @@ ctx	en	zh	use
 	The shape of the picture and the window sizes offered.	画面比例，以及可选的窗口大小	E
 	Window Size	窗口大小	E
 	The size of the window when not full screen.	非全屏时的窗口大小	E
-	Graphics and display settings of the PC version.	PC版的图形与显示设置	E
+	Graphics and display settings of the PC version.	重编版的图形与显示设置	E
 	Sets the resolution the game is drawn at.	设置游戏画面的渲染分辨率	E
 	Keeps textures sharp at an angle; Off is the console's filtering.	各向异性过滤：远处与侧面的纹理更清晰，关为原版	E
 	Sets the resolution of the character shadows.	设置角色阴影的分辨率	E
@@ -57,7 +57,7 @@ ctx	en	zh	use
 	Toggle HUD	切换界面显示	P
 	Shows or hides the HUD (Display > HUD). Not bound unless chosen.	显示或隐藏界面（显示 → 界面显示）。默认不绑定	P
 	Positional audio and the speakers.	立体声定位与声道。	E
-	Returns to the Recomp Settings screen.	返回PC版设置画面	E
+	Returns to the Recomp Settings screen.	返回重编设置画面	E
 	Infinite Health	无限体力	E
 	Infinite Ninpo	无限忍法	E
 	Infinite Essence	无限精魂	E
