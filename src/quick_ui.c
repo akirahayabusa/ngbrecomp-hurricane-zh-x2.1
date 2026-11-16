@@ -34,6 +34,10 @@ static int s_request_step;      /* opened by Left / Right: a card that way at on
 static uint64_t s_repeat_at;
 /* The card last on in each category, where the menu opens next (0xFFFF none yet) */
 static uint16_t s_remember[NGB_QUICK_CATEGORIES] = { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF };
+/* what was equipped (NgbQuickView.equipped) when each card was remembered: a remembered card counts only while that
+ * is still so -- equipped otherwise (a save loaded, a death, the pause menu's Weapons), the menu opens on what is
+ * equipped (#199) */
+static uint16_t s_remember_eq[NGB_QUICK_CATEGORIES] = { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF };
 static uint32_t s_repeat;
 static char s_game_dir[4096];
 static char s_message[64];
@@ -220,6 +224,11 @@ void ngb_quick_open(const NgbQuickMenu *menu)
     s_block = 1;
     for (int c = 0; c < NGB_QUICK_CATEGORIES; c++) {   /* each category on the card it was left on */
         NgbQuickView *v = &s_menu.views[c];
+        if (s_remember[c] != 0xFFFF && s_remember_eq[c] != v->equipped) {
+            fprintf(stderr, "[QUICK] category %d: %04X equipped since, not %04X; %04X forgotten\n", c + 1, v->equipped,
+                    s_remember_eq[c], s_remember[c]);
+            s_remember[c] = 0xFFFF;
+        }
         for (int i = 0; i < v->count; i++)
             if (v->entries[i].id == s_remember[c])
                 v->index = i;
@@ -230,6 +239,7 @@ void ngb_quick_open(const NgbQuickMenu *menu)
     if (step && opened->count > 1) {                  /* opened by Left / Right: that card at once, */
         opened->index = (opened->index + step + opened->count) % opened->count;
         s_remember[s_menu.category - 1] = opened->entries[opened->index].id;
+        s_remember_eq[s_menu.category - 1] = opened->equipped;
         s_navigation++;                                /* its sound, */
         s_repeat = step < 0 ? Q_LEFT : Q_RIGHT;        /* and held, on as inside the menu */
         s_repeat_at = SDL_GetTicks64() + 380;
@@ -369,8 +379,14 @@ static Icon *icon(const char *name)
 {
     if (!*name)
         return NULL;
-    char filename[32];
-    snprintf(filename, sizeof filename, "%s", name);
+    /* "archive/file#sprite": another archive than spr.afs (the HUD's game.spr is in demo.afs) */
+    char archive[16] = "spr.afs", filename[32];
+    const char *slash = strchr(name, '/');
+    if (slash && slash - name < (int)sizeof archive) {
+        snprintf(archive, sizeof archive, "%.*s", (int)(slash - name), name);
+        snprintf(filename, sizeof filename, "%s", slash + 1);
+    } else
+        snprintf(filename, sizeof filename, "%s", name);
     char *part = strchr(filename, '#');
     unsigned sprite = part ? (unsigned)strtoul(part + 1, NULL, 10) : 0;
     if (part)
@@ -383,10 +399,10 @@ static Icon *icon(const char *name)
     Icon *it = &s_icons[s_icon_count++];
     snprintf(it->name, sizeof it->name, "%s", name);
     char path[4200];
-    FILE *f = xbox_mod_file("spr.afs", path, sizeof path) ? fopen(path, "rb") : NULL;   /* (a mod's, as the game
-                                                                                           * reads it: #179) */
+    FILE *f = xbox_mod_file(archive, path, sizeof path) ? fopen(path, "rb") : NULL;   /* (a mod's, as the game
+                                                                                         * reads it: #179) */
     if (!f) {
-        snprintf(path, sizeof path, "%s/spr.afs", s_game_dir);
+        snprintf(path, sizeof path, "%s/%s", s_game_dir, archive);
         f = fopen(path, "rb");
     }
     if (!f)
@@ -570,6 +586,18 @@ static void art_fit(Icon *it, float cx, float cy, float width, float height, uns
     float sx = width / bw, sy = height / bh;
     art(it, cx, cy, (sx < sy ? sx : sy) * (bw > bh ? bw : bh), alpha);
 }
+/* A bow's arrows (#173), as the HUD shows them when the bow is out: its arrow
+ * from game.spr (sprite 80, the dark-fletched 81 for explosive arrows) with the glow at the head that tells them
+ * apart -- the orange one (85) for explosive arrows, the blue streak (83) for APFSDS cores. kind: e->badge. */
+static void badge(const char *kind, float cx, float cy, int size, unsigned alpha)
+{
+    float s = (float)size, head = s * 0.28f;   /* the arrow's head is at the bottom left */
+    if (!strcmp(kind, "fire"))
+        art_fit(icon("demo.afs/game.spr#85"), cx - head, cy + head, s * 0.75f, s * 0.75f, alpha);
+    art_fit(icon(!strcmp(kind, "fire") ? "demo.afs/game.spr#81" : "demo.afs/game.spr#80"), cx, cy, s, s, alpha);
+    if (!strcmp(kind, "core"))
+        art_fit(icon("demo.afs/game.spr#83"), cx - head * 0.6f, cy + head * 0.6f, s * 0.7f, s * 0.7f, alpha);
+}
 static void panel(float cx, float cy, int width, int height, unsigned alpha)
 {
     /* Save/Load's silver panel supplies the etched background. Use its plain
@@ -713,6 +741,21 @@ static void category_panel(int category, const NgbQuickEntry *entry, int cy, uns
             184, (float)cy, 76, 22, entry->art[0] ? alpha : alpha / 3);
 }
 
+/* Bow Crosshair (#228): the game's own glow at an arrow's head (game.spr, sprite 85: white at its middle, orange
+ * around), on a clear size x size picture, premultiplied as the quick menu's layer. 0 while the sprite is missing. */
+int ngb_crosshair_picture(uint32_t *pixels, int size)
+{
+    Icon *it = icon("demo.afs/game.spr#85");
+    if (!it || !it->px)
+        return 0;
+    memset(pixels, 0, (size_t)size * size * 4);
+    s_px = pixels;
+    s_w = size;
+    s_h = size;
+    art_fit(it, size * 0.5f, size * 0.5f, size * 0.8f, size * 0.8f, 255);   /* (room for the faint halo past its bounds) */
+    return 1;
+}
+
 int ngb_quick_layer(uint32_t *pixels)
 {
     if (!ngb_pc_setting(20)) return 0;
@@ -760,6 +803,7 @@ int ngb_quick_layer(uint32_t *pixels)
             {
                 view->index = i;
                 s_remember[view->category - 1] = view->entries[view->index].id;
+                s_remember_eq[view->category - 1] = view->equipped;
                 s_navigation++;
                 s_revision++;
                 s_message[0] = 0;
@@ -785,6 +829,8 @@ int ngb_quick_layer(uint32_t *pixels)
         {
             s_command_item = e->id;
             s_command_category = view->category;
+            s_remember[view->category - 1] = e->id;       /* equipped or used now: what it opens on next */
+            s_remember_eq[view->category - 1] = e->id;
             s_command = 1;
             /* The guest acknowledges this only after rechecking the action
              * gate. A live-mode race must leave the menu open and waiting. */
@@ -839,6 +885,9 @@ int ngb_quick_layer(uint32_t *pixels)
             float x = cx + relative * 89, y = cy;
             panel(x, y, relative ? 66 : 96, relative ? 66 : 96, relative ? 150 : 235);
             art_fit(icon(e->art), x, y, relative ? 52 : 82, relative ? 52 : 82, relative ? 180 : 255);
+            if (e->badge[0])   /* a bow's arrows, at the top left of the card (#173; its count is bottom right) */
+                badge(e->badge, x - (relative ? 16 : 24), y - (relative ? 16 : 24), relative ? 26 : 38,
+                      relative ? 180 : 255);
             if (e->quantity)
             {
                 char qty[12];

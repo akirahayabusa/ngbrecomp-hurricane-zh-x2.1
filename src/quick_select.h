@@ -12,11 +12,14 @@ typedef struct
 {
     uint16_t id;
     uint8_t count, usable, quantity, level;
+    uint8_t other_slot;   /* listed with the melee weapons but equipped in another slot (the Spear Gun) */
     char art[24], name[64];
+    char badge[8];   /* a bow's arrows, drawn in the card's corner: "plain", "fire", "core"; else empty */
 } NgbQuickEntry;
 typedef struct
 {
     int category, freeze, count, index;
+    uint16_t equipped;   /* the equipped weapon or Ninpo, the last item used: index's when made; 0xFFFF none */
     NgbQuickEntry entries[NGB_QUICK_CAP];
 } NgbQuickView;
 typedef struct
@@ -40,6 +43,7 @@ int ngb_quick_frozen(void);
 #define NGB_QUICK_HEIGHT 312
 /* A small transparent, premultiplied BGRA layer; no game-frame readback. */
 int ngb_quick_layer(uint32_t *pixels);
+int ngb_crosshair_picture(uint32_t *pixels, int size);   /* Bow Crosshair's picture (src/quick_ui.c) */
 int ngb_quick_take_command(uint16_t *item, int *category);
 int ngb_quick_take_navigation(void);
 void ngb_quick_tick(void);

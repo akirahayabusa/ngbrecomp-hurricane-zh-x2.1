@@ -258,3 +258,16 @@ cat	Controls	按键	P
 	Skip Any Cutscene	跳过任何过场	E
 	Start skips any movie or in-game cutscene, watched before or not. Off: as on the Xbox.	按开始键可跳过任何影片与过场，不论是否看过。关：与Xbox相同	E
 	Cross: change   Square / Delete: clear   (play only; the menus keep theirs)	×：更改　□ / Delete：清除（仅限游戏操作，菜单按键不变）	P
+# --- 0.9.59-0.9.70 (HUD Style, HUD Aspect, Frame Interpolation)
+	HUD Style	HUD样式	E
+	HUD Aspect	HUD比例	E
+	Frame Interpolation	插帧	E
+	Compact	精简	E
+	Stretched	拉长	E
+	Corrected	修正	E
+	Full Rate	全速	E
+	Half Rate	半速	E
+	Healing items, talismans and jewels are not used up. For this session only.	恢复道具、还魂护符与各种珠不会消耗。仅本次有效	E
+	Compact: the health bar, weapon and karma window smaller and nearer the screen's corners.	精简：体力条、武器与业力窗口缩小，并靠近画面四角	E
+	Corrected: the HUD in its own shape on a wide screen, not stretched across it.	修正：HUD 保持原本比例，不随画面横向拉长	E
+	Experimental. Pictures between the game's frames, on a 120 Hz or faster display.	实验性功能。在游戏的帧之间插入画面，需要 120 Hz 以上的显示器	E

@@ -150,6 +150,11 @@ int ngb_pc_setting(int which)
     case 20: return s_running.quick_menu_scale;
     case 23: return s_running.positional_audio;
     case 24: return s_running.show_hud;
+    case 41: return s_running.hud_style;
+    case 42: return s_running.hud_aspect;
+    case 43: return 1;   /* Hurricane: upstream's Talisman of Rebirth not taken -- x2.1 switches it itself */
+    case 44: return 0;   /* Hurricane: upstream's Bow Crosshair not taken -- x2.1 has its own (画面设置) */
+    case 45: return s_running.frame_interp;
     case 29: return s_running.detail_under_load;
     case 30: return s_running.render_thread;
     case 33: return s_running.essence_charging;
@@ -191,6 +196,11 @@ void ngb_pc_set_setting(int which, int value)
     case 18: s_running.smooth_glow = !!value; break;
     case 23: s_running.positional_audio = value < 0 ? 0 : value > 3 ? 3 : value; ngb_audio_set_positional(s_running.positional_audio); break;
     case 24: s_running.show_hud = !!value; break;
+    case 41: s_running.hud_style = !!value; break;
+    case 42: s_running.hud_aspect = !!value; break;
+    case 43: s_running.talisman = !!value; break;
+    case 44: s_running.bow_crosshair = !!value; break;
+    case 45: s_running.frame_interp = value < 0 ? 0 : value > 3 ? 3 : value; break;   /* at the next frame (src/d3d/hle.cpp) */
     case 29: s_running.detail_under_load = !!value; break;
     case 30: s_running.render_thread = !!value; break;   /* at the next start */
     case 33: s_running.essence_charging = !!value; break;
@@ -458,6 +468,15 @@ void ngb_pause_resume(void)
     pulse_push(XBOX_GAMEPAD_START);
 }
 
+/* The karma window's button pressed once (src/hud.c, #214: off as the HUD goes off, on as it comes back) */
+void ngb_karma_window_press(void)
+{
+    extern int ngb_game_button_for(int action);   /* src/bindings.c */
+    int b = ngb_game_button_for(10);                /* Karma Window */
+    if (b >= 0)
+        pulse_push(0x100 | (1u << b));
+}
+
 /* Exit to Desktop: as closing the window does. */
 void ngb_quit_to_desktop(void)
 {
@@ -693,6 +712,7 @@ static void to_menu_tick(void)
 /* ---------- the mouse in the game's own menus ---------- */
 
 int ngb_menu_up(void);                              /* src/menu_mouse.c */
+int ngb_menu_up_controls(void);   /* src/menu_mouse.c: by the frames (#218) */
 int ngb_pause_tab_hit(float x, float y, int *zone); /* src/pause_tab.c */
 int ngb_pause_exit_hit(float x, float y);
 int ngb_pause_tab_page(void);
@@ -1147,7 +1167,7 @@ static bool game_mouse(const SDL_Event *ev)
         s_move_seq++;
         s_move_ms = mono_ms();
     }
-    if (s_open || !ngb_menu_up())
+    if (s_open || !ngb_menu_up_controls())   /* (by the frames, as the keys and pad: #218) */
         return false;
     if (tab_shown()) {                    /* the pause menu's Options page */
         float gx, gy;
@@ -1298,7 +1318,7 @@ void nv2a_window_event_hook(const void *sdl_event)
     if (game_mouse(ev))
         return;
     if (ev->type == SDL_KEYDOWN && !ev->key.repeat && ev->key.keysym.sym == SDLK_ESCAPE &&
-        !s_open && ngb_menu_up() && !(tab_shown() && s_tab_focus)) {
+        !s_open && ngb_menu_up_controls() && !(tab_shown() && s_tab_focus)) {
         pulse_push(0x100 | 0x02);                     /* Esc: B, back */
         return;
     }

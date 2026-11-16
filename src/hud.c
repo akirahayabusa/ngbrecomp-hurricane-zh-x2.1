@@ -37,7 +37,31 @@ void sub_001FA210(void)
         esp += 4;
         return;
     }
-    if (ngb_pc_setting(24)) {
+    /* The karma window turned off as the HUD goes off and on again as it comes back, by its button, as the player
+     * would (#214): skipped while the HUD is off, the window's tally after a fight froze, and its Combo, Kill and
+     * Time stayed on screen once the HUD was back; turned on again, it starts over. Pressed only as needed, by the
+     * window's own state (0x8DB6DC, its state machine sub_00207760: 0 hidden, 1 sliding in, 7 sliding out -- its
+     * place, 0x8DB6D8, reads 0xFF06 both hidden and as it starts in): off only if it shows, on again
+     * only if it showed and is hidden -- a press the game missed (two at once, the game took the first only; one
+     * as the pause menu closes, a button still held) leaves it as it is rather than the other way round. In play
+     * only, not under the pause menu (which would take the press): a change made there is pressed when play goes
+     * on. The setting is read once: the Toggle HUD key changes it from another thread. */
+    int on = ngb_pc_setting(24);
+    static int hidden_for = -1;   /* the HUD off: whether the window showed then (-1: the HUD is on) */
+    if (!MEM8(0xDB9AD5)) {
+        extern void ngb_karma_window_press(void);   /* src/ingame_menu.c */
+        int shows = MEM16(0x8DB6DC) != 0 && MEM16(0x8DB6DC) != 7;
+        if (!on && hidden_for < 0) {
+            hidden_for = shows;
+            if (shows)
+                ngb_karma_window_press();
+        } else if (on && hidden_for >= 0) {
+            if (hidden_for && !shows)
+                ngb_karma_window_press();
+            hidden_for = -1;
+        }
+    }
+    if (on) {
         eax = MEM16(0x58A56C);
         ecx = MEM16(0x58A56E);
         edx = MEM16(0x58A564);

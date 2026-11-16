@@ -172,10 +172,13 @@ of the pause menu. Changes apply at once and are saved.
 - **Graphics**: render resolution (1x–10x), texture filtering (the console's, or 2x–16x
   anisotropic), anti-aliasing (MSAA), shadow resolution, Smoother Glow (a softer, fainter glow on
   bright lights; off is the console's look), Lower Detail Under Load, Multithreaded Renderer (drawing on a
-  thread of its own, for slower CPUs; on by default on Android, off unless chosen on a PC)
+  thread of its own, for slower CPUs; on by default on Android, off unless chosen on a PC), Frame
+  Interpolation (experimental: pictures made between the game's 60 frames a second, for displays of 120 Hz
+  and up; Full Rate, Half Rate or 2x)
 - **Display**: aspect ratio (4:3, 16:9, 16:10, 21:9, 32:9), window size, windowed / fullscreen /
-  borderless, V-Sync (Off, Mailbox, FIFO, Adaptive), frame-rate counter, the HUD on or off, skip the
-  warnings and intro movies
+  borderless, V-Sync (Off, Mailbox, FIFO, Adaptive), frame-rate counter, the HUD on or off, HUD Style
+  (Normal, or Compact: smaller and closer to the corners), HUD Aspect (Stretched like the game's widescreen
+  mode, or Corrected: the HUD in its own 4:3 shape on a wide screen), skip the warnings and intro movies
 - **Sound**: Positional Audio (3D sounds placed left and right: Mixed, the default, half the sound chip's
   filters and half panned by direction, the easiest to place; Clear, by level only; Console, through the sound
   chip's filters as on the Xbox, duller; Off, centred), Audio Output (Auto, Stereo
@@ -186,7 +189,8 @@ of the pause menu. Changes apply at once and are saved.
   Charging**, Ultimate Techniques charged only by absorbing essence, not by holding attack (#120); **Skip Any
   Cutscene**, Start skipping movies and in-game cutscenes not yet watched (#139); **Responsive Menus**, Start
   taken at once at the title, in a cutscene's opening wait and in the pause menu after equipping, where the game
-  ignores it for a while (#116)
+  ignores it for a while (#116); **Bow Crosshair**, a dot where the arrow will land while aiming a bow in first
+  person, the game's own glow from an arrow's head (#228)
 - **Cheats** (for the session only): infinite health, ninpo, essence, items, projectiles; golden scarabs; one
   hit kill (any hit that hurts an enemy or a boss kills it).
   Its **Unlocks** page: all difficulties from the start, all costumes, and the main menu's Missions (with every
@@ -244,7 +248,7 @@ the title screen; turn off **Start+Back Reset** (Controls) if another program us
 With the **Quick Menu** on (RECOMP SETTINGS → Gameplay), Up and Down on the d-pad (or the Up / Down
 arrows, 1 / 2) open it on the melee weapons or the items, and Left and Right on the previous or next
 melee weapon; Up and Down then change category, Left and Right choose, A / Enter equips or uses, B /
-Escape closes. Its keys are in Controls.
+Escape closes. With Quick Menu Pause on, using an item leaves it open, so several can be used in a row. Its keys are in Controls.
 
 In the menus the mouse points and clicks, Esc goes back and Q / E switch the pause menu's tabs.
 With Skip Any Cutscene (Gameplay), movies and in-game cutscenes can be skipped with Start (or
@@ -347,7 +351,8 @@ Code:
 
 - [akirahayabusa](https://github.com/akirahayabusa): the freeze in scenes with the sun (#40), folders
   with non-ASCII names on Windows (#41), the Difficulty Selection highlight (#42); and the Hurricane
-  patch (vb-zh x2.1), whose Intercept switch showed where Black had left the mechanic out (#109, #132)
+  patch (vb-zh x2.1), whose Intercept switch showed where Black had left the mechanic out (#109, #132);
+  his native port (ngb-pc-native-port) showed where the heat haze reads past its picture (#55)
 - [ManemanFTW](https://github.com/ManemanFTW) (Manuel Flores): the Windows start-up hang (#9) and the
   audio crackling on Windows (#34)
 - [HammerD72](https://github.com/HammerD72): the audio timing fix (#32); the two spots where the game

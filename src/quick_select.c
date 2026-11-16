@@ -338,22 +338,28 @@ static void picture(NgbQuickEntry *e)
         art = "smokebom";
         name = "Smoke Bomb";
         break;
+    /* The bows look nearly alike: each also shows, small in a corner, the arrows it shoots (the HUD's pictures
+     * of them, #173) */
     case 0x27:
     case 0x29:
         art = "bow01";
         name = "Bow";
+        snprintf(e->badge, sizeof e->badge, "core");
         break;
     case 0x8D:
         art = "bow02";
         name = "Bow";
+        snprintf(e->badge, sizeof e->badge, "plain");
         break;
     case 0xE2:
         art = "bow03";
         name = "Bow";
+        snprintf(e->badge, sizeof e->badge, "fire");
         break;
     case 0xF8:
         art = "bow04";
         name = "Strongbow";
+        snprintf(e->badge, sizeof e->badge, "plain");
         break;
     case 0x98:
         art = "sgun";
@@ -391,6 +397,15 @@ static void picture(NgbQuickEntry *e)
         art = "re_mp_l";
         name = "Great Devil Elixir";
         break;
+    /* Ayane's rice balls (#224): their own pictures, the game's 0x0A and 0x0B after the Spirit Elixirs' */
+    case 0x172:
+        art = "omusubi";
+        name = "Ayane's Rations";
+        break;
+    case 0x180:
+        art = "omusu_ex";
+        name = "Ayane's Ration Bundle";
+        break;
     case 0x181:
         art = "re_mp_ex";
         name = "Fragrance of Dayflower";
@@ -421,6 +436,7 @@ static void make_view(NgbQuickView *v, int category)
 {
     memset(v, 0, sizeof *v);
     v->category = category;
+    v->equipped = 0xFFFF;
     v->freeze = ngb_pc_setting(19);
     uint32_t player = MEM8(0x4B7640) * 0x210u;
     for (uint32_t p = 0x5891D0; p < 0x5893D0 && v->count < NGB_QUICK_CAP; p += 4)
@@ -466,7 +482,15 @@ static void make_view(NgbQuickView *v, int category)
         unsigned cls = MEM8(r + 0xD);
         if ((category != NGB_QUICK_ITEMS && item == MEM16(0x58A570 + player + (cls - 1) * 2)) ||
             (category == NGB_QUICK_ITEMS && item == s_last_heal))
-            v->index = v->count;
+        {
+            /* the melee view's: its own slot's (the Spear Gun, listed there, has the ranged slot) */
+            if (category != NGB_QUICK_MELEE || cls == 1 || v->equipped == 0xFFFF)
+            {
+                v->index = v->count;
+                v->equipped = item;
+            }
+        }
+        e->other_slot = category == NGB_QUICK_MELEE && cls != 1;
         v->count++;
     }
 }
@@ -628,7 +652,12 @@ static void quick_step(void)
     int ready = can_pause();
     if (ngb_quick_take_command(&item, &category) && ready)
     {
-        ngb_quick_close();
+        /* With the game paused (Quick Menu Pause), a restorative leaves the menu open, so several can be used
+         * in a row (#200); its count is rebuilt below, and one more than can help reads "Already full". Live,
+         * it closes as before: open, the menu keeps the controls while the fight goes on. A weapon or Ninpo
+         * closes it either way: equipping one reloads the world. */
+        if (category != NGB_QUICK_ITEMS || !ngb_quick_frozen())
+            ngb_quick_close();
         dispatch_command(item, category);
     }
     if (!ngb_quick_wanted()) pause_menu(0);

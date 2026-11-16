@@ -39,6 +39,16 @@ static double s_aspect = 4.0 / 3.0;
 static int s_vsync;                /* 0 off, 1 mailbox, 2 adaptive, 3 FIFO */
 static volatile bool s_resized;
 
+/* A display-mode change (windowed, fullscreen, borderless) is made on the window's thread while frames are
+ * presented from others. With V-Sync off, presenting immediately right through the change hard-froze a whole
+ * system (a GTX 1060 laptop on driver 581.80 with an external screen, ngb-recomp #227; with V-Sync on it never did).
+ * So the window's thread raises s_switching and waits (up to 200 ms) for a present or swapchain under way to finish
+ * (s_in_present), presents and swapchains wait until it is done, and the swapchains made in the second after it (the new size comes
+ * in a few events) are FIFO, which waits for the display; then the chosen mode is back. */
+static int s_switching, s_in_present;
+static int64_t s_fifo_until;   /* monotonic us: FIFO until then, V-Sync off (0: no hold) */
+static bool s_fifo_held;       /* the last swapchain asked for was FIFO for the hold, not by the setting */
+
 static VkInstance s_instance;
 #ifdef __APPLE__
 static int s_surface_pending;
@@ -76,8 +86,160 @@ volatile unsigned nv2a_ext_pictures, nv2a_ext_presented;
 static bool present_external_now(void);
 static volatile int s_quality_set;
 
+static void external_show(VkImage image, uint32_t width, uint32_t height);
+
+/* Frame interpolation: the pictures shown (external_show), the longest gap between two in the window (us), and
+ * whether any was made between frames (set_external_at): the counter then counts what is shown. */
+static volatile unsigned s_shown;
+static volatile int64_t s_shown_gap_us;
+static volatile int s_interp_seen;
+
+/* Frame interpolation (the D3D renderer's NGB_INTERP): pictures held to be
+ * shown at set times (nv2a_present_set_external_at, in the order given) by
+ * the pacer thread. Every picture is shown under s_show_mu, the held ones
+ * taken under it too: a picture shown now, or a flush, shows the held ones
+ * first, so the order never changes; a NULL (the renderer going) drops them.
+ * Lock order: s_show_mu, then s_hold_mu. */
+#define HOLD_MAX 8
+static pthread_mutex_t s_show_mu = PTHREAD_MUTEX_INITIALIZER;
+static SDL_mutex *s_hold_mu;
+static SDL_cond *s_hold_cv;
+static struct { VkImage img; uint32_t w, h; int64_t at; } s_hold[HOLD_MAX];
+static int s_hold_n;
+static pthread_once_t s_hold_once = PTHREAD_ONCE_INIT;
+
+static int hold_pacer(void *unused);
+static void hold_init(void)
+{
+    s_hold_mu = SDL_CreateMutex();
+    s_hold_cv = SDL_CreateCond();
+}
+
+/* (s_show_mu held) the first held picture, if due by `by` (or drop: none shown) */
+static bool show_first_locked(int64_t by, bool drop)
+{
+    SDL_LockMutex(s_hold_mu);
+    if (!s_hold_n || s_hold[0].at > by) {
+        SDL_UnlockMutex(s_hold_mu);
+        return false;
+    }
+    VkImage img = s_hold[0].img;
+    uint32_t w = s_hold[0].w, h = s_hold[0].h;
+    memmove(&s_hold[0], &s_hold[1], sizeof s_hold[0] * (size_t)--s_hold_n);
+    SDL_UnlockMutex(s_hold_mu);
+    if (!drop)
+        external_show(img, w, h);
+    return true;
+}
+
+/* (s_show_mu held) all held pictures, now */
+static void show_held_locked(bool drop)
+{
+    while (show_first_locked(INT64_MAX, drop)) {
+    }
+}
+
+void nv2a_present_flush_held(void)
+{
+    pthread_once(&s_hold_once, hold_init);
+    pthread_mutex_lock(&s_show_mu);
+    show_held_locked(false);
+    pthread_mutex_unlock(&s_show_mu);
+}
+
+static int hold_pacer(void *unused)
+{
+    (void)unused;
+    SDL_LockMutex(s_hold_mu);
+    for (;;) {
+        if (!s_hold_n) {
+            SDL_CondWait(s_hold_cv, s_hold_mu);
+            continue;
+        }
+        int64_t left = s_hold[0].at - g_get_monotonic_time();
+        if (left > 1500) {   /* the last of it in short sleeps: the wait's own timer is in milliseconds */
+            SDL_CondWaitTimeout(s_hold_cv, s_hold_mu, (Uint32)(left / 1000 - 1));
+            continue;
+        }
+        SDL_UnlockMutex(s_hold_mu);
+        if (left > 0) {
+            SDL_Delay(0);
+        } else {
+            pthread_mutex_lock(&s_show_mu);
+            show_first_locked(g_get_monotonic_time(), false);   /* (none if a newer picture took it meanwhile) */
+            pthread_mutex_unlock(&s_show_mu);
+        }
+        SDL_LockMutex(s_hold_mu);
+    }
+    return 0;
+}
+
+static int s_refresh_hz;
+int nv2a_present_refresh_hz(void)
+{
+    return __atomic_load_n(&s_refresh_hz, __ATOMIC_RELAXED);
+}
+
+int64_t nv2a_present_now_us(void)
+{
+    return g_get_monotonic_time();
+}
+
+void nv2a_present_set_external_at(VkImage image, uint32_t width, uint32_t height, int64_t at_us)
+{
+    static bool pacer;   /* (under s_show_mu) started with the first held picture */
+    pthread_once(&s_hold_once, hold_init);
+    pthread_mutex_lock(&s_show_mu);
+    if (!pacer) {
+        pacer = true;
+        SDL_DetachThread(SDL_CreateThread(hold_pacer, "present-pacer", NULL));
+    }
+    for (;;) {   /* full: the first shown now */
+        SDL_LockMutex(s_hold_mu);
+        bool full = s_hold_n == HOLD_MAX;
+        SDL_UnlockMutex(s_hold_mu);
+        if (!full)
+            break;
+        show_first_locked(INT64_MAX, false);
+    }
+    __atomic_store_n(&s_interp_seen, 1, __ATOMIC_RELAXED);
+    SDL_LockMutex(s_hold_mu);
+    if (s_hold_n && at_us < s_hold[s_hold_n - 1].at)
+        at_us = s_hold[s_hold_n - 1].at;   /* (in order) */
+    s_hold[s_hold_n].img = image;
+    s_hold[s_hold_n].w = width;
+    s_hold[s_hold_n].h = height;
+    s_hold[s_hold_n].at = at_us;
+    s_hold_n++;
+    SDL_CondSignal(s_hold_cv);
+    SDL_UnlockMutex(s_hold_mu);
+    pthread_mutex_unlock(&s_show_mu);
+}
+
 void nv2a_present_set_external(VkImage image, uint32_t width, uint32_t height)
 {
+    pthread_once(&s_hold_once, hold_init);
+    pthread_mutex_lock(&s_show_mu);
+    show_held_locked(image == VK_NULL_HANDLE);
+    external_show(image, width, height);
+    pthread_mutex_unlock(&s_show_mu);
+}
+
+static void external_show(VkImage image, uint32_t width, uint32_t height)
+{
+    static int show_log = -1;   /* NV2A_SHOW_LOG=1: the time since the last picture shown, for each */
+    if (show_log < 0)
+        show_log = getenv("NV2A_SHOW_LOG") != NULL;
+    if (image) {
+        static int64_t last;   /* (under s_show_mu) */
+        int64_t t = g_get_monotonic_time();
+        if (show_log)
+            fprintf(stderr, "[SHOW] %+.2f ms\n", last ? (t - last) / 1000.0 : 0.0);
+        if (last && t - last > __atomic_load_n(&s_shown_gap_us, __ATOMIC_RELAXED))
+            __atomic_store_n(&s_shown_gap_us, t - last, __ATOMIC_RELAXED);
+        __atomic_add_fetch(&s_shown, 1, __ATOMIC_RELAXED);
+        last = t;
+    }
     __atomic_store_n(&s_ext_set_us, g_get_monotonic_time(), __ATOMIC_RELAXED);
     __atomic_store_n(&s_ext_w, width, __ATOMIC_RELAXED);
     __atomic_store_n(&s_ext_h, height, __ATOMIC_RELAXED);
@@ -237,10 +399,20 @@ static void fps_track(void)
     if (now - window_ns >= 500000000u) {
         double secs = (now - window_ns) / 1e9;
         unsigned frames_logged = frames;
-        double fps = frames / secs;
+        static unsigned last_shown;
+        unsigned shown = __atomic_load_n(&s_shown, __ATOMIC_RELAXED), pics = shown - last_shown;
+        last_shown = shown;
+        int64_t gap = __atomic_exchange_n(&s_shown_gap_us, 0, __ATOMIC_RELAXED);
+        unsigned count = frames;
+        double worst = max_ms;
+        if (__atomic_exchange_n(&s_interp_seen, 0, __ATOMIC_RELAXED)) {   /* interpolating: the pictures shown */
+            count = pics;
+            worst = gap / 1000.0;
+        }
+        double fps = count / secs;
         pthread_mutex_lock(&s_fps_text_mu);
         snprintf(s_fps_text, sizeof s_fps_text, "%.0f FPS  %.1f ms  max %.1f",
-                 fps, frames ? secs * 1000.0 / frames : 0.0, max_ms);
+                 fps, count ? secs * 1000.0 / count : 0.0, worst);
         pthread_mutex_unlock(&s_fps_text_mu);
         /* NV2A_FPS_LOG=1: to stderr; NV2A_FPS_LOG=<path>: appended to that
          * file (where stderr is hard to reach, e.g. a Steam launch). */
@@ -799,6 +971,25 @@ __attribute__((weak)) void nv2a_window_tick(void) {}
 
 __attribute__((weak)) void xbox_InputHotplugPoll(void) {}
 
+/* Around a display-mode change, on the window's thread (s_switching above). */
+static void mode_switch_begin(void)
+{
+    __atomic_store_n(&s_switching, 1, __ATOMIC_SEQ_CST);
+    int i = 0;
+    for (; i < 200 && __atomic_load_n(&s_in_present, __ATOMIC_SEQ_CST); i++)
+        SDL_Delay(1);
+    if (i == 200)
+        fprintf(stderr, "nv2a: display mode change with a present still under way after 200 ms\n");
+    SDL_Delay(20);   /* (what is queued reaches the display) */
+}
+
+static void mode_switch_end(void)
+{
+    __atomic_store_n(&s_fifo_until, g_get_monotonic_time() + 1000000, __ATOMIC_RELEASE);
+    s_resized = true;
+    __atomic_store_n(&s_switching, 0, __ATOMIC_SEQ_CST);
+}
+
 bool nv2a_window_pump(void)
 {
 #ifdef __APPLE__
@@ -814,10 +1005,22 @@ bool nv2a_window_pump(void)
 #endif
     xbox_InputHotplugPoll();   /* pads connected or gone in the last pump (xboxrecomp input) */
     nv2a_window_tick();
+    {   /* the display's refresh rate, now and then (nv2a_present_refresh_hz: other threads) */
+        static int64_t next;
+        int64_t now = g_get_monotonic_time();
+        if (s_window && now >= next) {
+            SDL_DisplayMode m;
+            int d = SDL_GetWindowDisplayIndex(s_window);
+            if (SDL_GetCurrentDisplayMode(d < 0 ? 0 : d, &m) == 0)
+                __atomic_store_n(&s_refresh_hz, m.refresh_rate, __ATOMIC_RELAXED);
+            next = now + 1000000;
+        }
+    }
     SDL_Event ev;
 
     if (__atomic_exchange_n(&s_win_req, 0, __ATOMIC_ACQ_REL)) {
         bool fs = SDL_GetWindowFlags(s_window) & SDL_WINDOW_FULLSCREEN;
+        mode_switch_begin();
         if (s_win_fs != 1 && fs)
             SDL_SetWindowFullscreen(s_window, 0);
         if (s_win_fs != 2)
@@ -831,7 +1034,7 @@ bool nv2a_window_pump(void)
             borderless_apply(s_window);
         if (s_win_fs == 1 && !fs)
             SDL_SetWindowFullscreen(s_window, SDL_WINDOW_FULLSCREEN_DESKTOP);
-        s_resized = true;
+        mode_switch_end();
     }
 
     while (SDL_PollEvent(&ev)) {
@@ -851,10 +1054,12 @@ bool nv2a_window_pump(void)
                 (ev.key.keysym.sym == SDLK_RETURN &&
                  (ev.key.keysym.mod & KMOD_ALT))) {
                 bool fs = SDL_GetWindowFlags(s_window) & SDL_WINDOW_FULLSCREEN;
+                mode_switch_begin();
                 SDL_SetWindowFullscreen(s_window,
                                         fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
                 if (fs)
                     SDL_SetWindowBordered(s_window, SDL_TRUE);
+                mode_switch_end();
             }
             break;
         default:
@@ -1091,6 +1296,11 @@ static VkPresentModeKHR choose_present_mode(PGRAPHVkState *r)
         mailbox |= modes[i] == VK_PRESENT_MODE_MAILBOX_KHR;
         immediate |= modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR;
         relaxed |= modes[i] == VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+    }
+    s_fifo_held = false;
+    if (s_vsync == 0 && g_get_monotonic_time() < __atomic_load_n(&s_fifo_until, __ATOMIC_ACQUIRE)) {
+        s_fifo_held = true;
+        return VK_PRESENT_MODE_FIFO_KHR;   /* just after a display-mode change */
     }
     if (s_vsync == 0 && immediate)
         return VK_PRESENT_MODE_IMMEDIATE_KHR;
@@ -1523,8 +1733,40 @@ static void fit_backdrop(const uint8_t *src, int sw, int sh, uint32_t *dst,
     }
 }
 
+/* A present's side of s_switching: false (the frame skipped) while the window changes mode. */
+static bool present_enter(void)
+{
+    __atomic_store_n(&s_in_present, 1, __ATOMIC_SEQ_CST);
+    if (!__atomic_load_n(&s_switching, __ATOMIC_SEQ_CST))
+        return true;
+    __atomic_store_n(&s_in_present, 0, __ATOMIC_SEQ_CST);
+    return false;
+}
+
+static void present_leave(void)
+{
+    __atomic_store_n(&s_in_present, 0, __ATOMIC_SEQ_CST);
+}
+
+/* The FIFO hold over: a swapchain in the chosen mode again. */
+static void fifo_hold_check(void)
+{
+    if (s_fifo_held && g_get_monotonic_time() >= __atomic_load_n(&s_fifo_until, __ATOMIC_ACQUIRE))
+        s_resized = true;
+}
+
+static void present_pixels_now(PGRAPHVkState *r, VkBuffer buf, int w, int h);
+
 /* Show a w x h host picture (0xAARRGGBB) in the window. */
 static void present_pixels(PGRAPHVkState *r, VkBuffer buf, int w, int h)
+{
+    if (!present_enter())
+        return;
+    present_pixels_now(r, buf, w, h);
+    present_leave();
+}
+
+static void present_pixels_now(PGRAPHVkState *r, VkBuffer buf, int w, int h)
 {
     unsigned f = s_frame++ % FRAMES_IN_FLIGHT;
     uint32_t idx;
@@ -1613,9 +1855,16 @@ static void overlay_run(PGRAPHState *pg)
             continue;
         }
 #endif
+        fifo_hold_check();
         if (s_resized || !s_swapchain) {
+            if (!present_enter()) {
+                g_usleep(16000);   /* (made once the window has changed) */
+                continue;
+            }
             s_resized = false;
-            if (!create_swapchain(r)) {
+            bool made = create_swapchain(r);
+            present_leave();
+            if (!made) {
                 g_usleep(16000);
                 continue;
             }
@@ -1767,7 +2016,17 @@ static bool present_external_now(void)
     return true;
 }
 
+static void present_frame(PGRAPHState *pg, bool on_pfifo);
+
 static void present_locked(PGRAPHState *pg, bool on_pfifo)
+{
+    if (!present_enter())
+        return;
+    present_frame(pg, on_pfifo);
+    present_leave();
+}
+
+static void present_frame(PGRAPHState *pg, bool on_pfifo)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
     VkCommandBuffer cmd;
@@ -1818,6 +2077,7 @@ static void present_locked(PGRAPHState *pg, bool on_pfifo)
         fps_init(r);
     }
     fps_track();
+    fifo_hold_check();
     if (s_resized || !s_swapchain) {
         s_resized = false;
         if (!create_swapchain(r))
@@ -1830,7 +2090,10 @@ static void present_locked(PGRAPHState *pg, bool on_pfifo)
                     __atomic_load_n(&s_ext_image, __ATOMIC_ACQUIRE) != VK_NULL_HANDLE)) {
         extern volatile int nv2a_vblank_hold;
         nv2a_vblank_hold = 1;
+        present_leave();   /* (overlay_run's presents and swapchains enter and leave on their own) */
         overlay_run(pg);
+        while (!present_enter())
+            g_usleep(1000);
         nv2a_vblank_hold = 0;
         if (s_resized || !s_swapchain) {
             s_resized = false;

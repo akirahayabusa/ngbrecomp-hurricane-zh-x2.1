@@ -145,6 +145,7 @@ void ngb_settings_load(NgbSettings *s)
     s->positional_audio = 3;  /* mixed: half the filters, half a pan by direction -- easiest to place (#126); clear
                                * (2) was the default from 0.9.40 to 0.9.51 */
     s->show_hud = 1;
+    s->talisman = 1;
     s->quick_menu_scale = 0;    /* the quick menu off unless chosen (Gameplay) */
     s->skip_intro = 0;
     s->show_launcher = 1;
@@ -200,6 +201,16 @@ void ngb_settings_load(NgbSettings *s)
             s->unlock[2] = atoi(val) != 0;
         } else if (!strcmp(key, "audio_output")) {
             s->audio_output = atoi(val) < 0 ? 0 : atoi(val) > 2 ? 2 : atoi(val);   /* 0 auto, 1 stereo, 2 5.1 */
+        } else if (!strcmp(key, "hud_style")) {
+            s->hud_style = atoi(val) != 0;
+        } else if (!strcmp(key, "talisman_of_rebirth")) {
+            s->talisman = atoi(val) != 0;
+        } else if (!strcmp(key, "frame_interpolation")) {
+            s->frame_interp = atoi(val) < 0 ? 0 : atoi(val) > 3 ? 3 : atoi(val);   /* 0 off, 1 Full Rate, 2 Half Rate, 3 2x */
+        } else if (!strcmp(key, "bow_crosshair")) {
+            s->bow_crosshair = atoi(val) != 0;
+        } else if (!strcmp(key, "hud_aspect")) {
+            s->hud_aspect = atoi(val) != 0;
         } else if (!strcmp(key, "show_hud")) {
             s->show_hud = atoi(val) != 0;
         } else if (!strcmp(key, "positional_audio")) {
@@ -286,6 +297,11 @@ void ngb_settings_save(const NgbSettings *s)
     fprintf(f, "responsive_menus = %d\n", s->responsive_menus);
     fprintf(f, "positional_audio = %d\n", s->positional_audio);
     fprintf(f, "show_hud = %d\n", s->show_hud);
+    fprintf(f, "hud_style = %d\n", s->hud_style);
+    fprintf(f, "hud_aspect = %d\n", s->hud_aspect);
+    fprintf(f, "talisman_of_rebirth = %d\n", s->talisman);
+    fprintf(f, "bow_crosshair = %d\n", s->bow_crosshair);
+    fprintf(f, "frame_interpolation = %d\n", s->frame_interp);
     fprintf(f, "audio_output = %d\n", s->audio_output);
     fprintf(f, "quick_menu_freeze = %d\n", s->quick_menu_freeze);
     fprintf(f, "quick_menu_scale = %d\n", ngb_quick_scale_value(s->quick_menu_scale));

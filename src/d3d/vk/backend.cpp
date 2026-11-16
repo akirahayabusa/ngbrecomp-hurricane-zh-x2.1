@@ -55,7 +55,11 @@ extern volatile int nv2a_fps_drawn_outside;   // (its own corner copy off once t
 int ngb_fps_picture(uint32_t* out, size_t max, int* w, int* h, unsigned* serial);   // src/fps_text.c
 extern volatile int ngb_fps_target_h;
 int ngb_fps_cap(int h, float* scale);
+int ngb_version_shown(void);
+int ngb_version_picture(uint32_t* out, size_t max, int* w, int* h, unsigned* serial);
+int ngb_bow_aiming(void);   // src/camera.c: Bow Crosshair
 }
+constexpr int kCrosshairSize = 64;   // Bow Crosshair's picture (src/quick_ui.c ngb_crosshair_picture)
 constexpr int kFpsWidth = 1024, kFpsHeight = 128;   // the counter's picture, at most (src/fps_text.c's)
 int ngb_pc_setting(int which);
 }
@@ -233,6 +237,7 @@ extern "C" int ngb_pc_setting(int which);
 extern "C" int nv2a_dirty_stamp(const void* host, size_t len, uint64_t* stamp);   // xboxrecomp nv2a_dirty.c
 extern "C" float ngb_hud_shape(void);   // src/pc_menu.c: the menus' and HUD's narrowing
 extern "C" int ngb_2d_stretched(void);
+static bool hud_picture(float x0, float x1, float y0, float y1, float w, float h);   // (below, HudPlace)
 extern "C" [[noreturn]] void ngb_renderer_fatal(const char* detail);  // src/ingame_menu.c  // src/pc_menu.c: the game in its widescreen mode, its 2D as drawn
 extern "C" int ngb_2d_screen_flags(void);   // src/pc_menu.c: ngb_2d_screen_frame's parts, for gpu::Peek
 extern "C" int ngb_2d_screen_frame(int threed);   // src/pc_menu.c: a 2D screen (a menu, the title, a chapter
@@ -360,7 +365,49 @@ public:
     void SyncLate(uint32_t) override {}
     void Flush() override { Submit(); }
     void SetGamma(const uint8_t* ramp) override;
-    void VisibilityBegin() override { vis_on_ = true; vis_test_++; }
+    void VisibilityBegin() override {
+        if (replay_) return;
+        vis_on_ = true;
+        vis_test_++;
+    }
+    void SetReplay(bool on) override {
+        replay_ = on;
+        if (on && (replay_stale_ >> replay_index_ & 1)) {
+            SyncReplayTargets();
+            replay_stale_ &= ~(1u << replay_index_);
+        }
+    }
+    void ReplaySkipped() override { replay_stale_ = ~0u; }
+    void ReplayIndex(int i) override { replay_index_ = std::clamp(i, 1, 3); }
+    void Pictures(int k) override {
+        if (std::max(k, 1) != pictures_) replay_stale_ = ~0u;   // (a replay index unused meanwhile fell behind)
+        pictures_ = std::max(k, 1);
+    }
+    void SetHold(bool on) override {
+        if (hold_ && !on) FreeReplayTargets();   // (switched off: their memory back)
+        hold_ = on;
+    }
+    void FreeReplayTargets();
+    int replay_index_ = 1;   // which of a frame's replays (1-3): each its own targets
+    int pictures_ = 1;       // pictures a frame (the game's and its replays')
+    void ReplayShowAt(int64_t at_us) override { replay_at_ = at_us; }
+    int64_t replay_at_ = 0;   // when the replay's picture is shown (0 at once)
+    uint32_t replay_stale_ = ~0u;   // by replay index: a frame went without it, its targets behind the game's
+    void SyncReplayTargets();
+    void ShowHeld(int64_t at_us) override {
+        if (held_ && at_us > 0) nv2a_present_set_external_at(held_->image, held_->w, held_->h, at_us);
+        else if (held_) nv2a_present_set_external(held_->image, held_->w, held_->h);
+        held_ = nullptr;
+    }
+    bool replay_ = false;   // a frame drawn again (frame interpolation)
+    // the replay's render targets its own (targets_' key, bits 61-62): the game's keep what its frame drew (a
+    // motion blur building on the last picture builds on the last of its own kind)
+    // (each replay of a frame its own set, bits 61-62 its index: an effect building on its last picture steps once
+    // a frame in each, as in the game's)
+    static constexpr uint64_t kReplayBits = 3ull << 61;
+    uint64_t ReplayKey() const { return replay_ ? uint64_t(replay_index_) << 61 : 0; }
+    bool hold_ = false;     // the frame's picture kept for ShowHeld
+    Image* held_ = nullptr;
     void VisibilityEnd(uint32_t report_va) override;
     void CapturePeek(const State& s, Peek& p) override;
     void CaptureQuick(QuickPeek& q) override;
@@ -399,16 +446,28 @@ private:
     std::set<uint32_t> glow_targets_;
     void ClassifyGlowTarget(const State& s,const Assembled& a,uint32_t count);
 
-    Image display_[3];   // copies of the front buffer for the presenter, in turn
+    Image display_[8];   // copies of the front buffer for the presenter, in turn (up to four a frame interpolating)
     Image quick_layer_;
     Image fps_layer_;   // the frame counter (FpsCounter, quick_menu.inc)
     std::vector<uint32_t> fps_pending_;   // its picture still to upload (a frame without one to show keeps it)
     bool fps_lettered_ = false;
+    Image version_layer_;   // the version in the main menu's corner (VersionLabel, quick_menu.inc)
+    std::vector<uint32_t> version_pending_;
+    int version_w_ = 0, version_h_ = 0;
+    Image crosshair_layer_;   // Bow Crosshair (Crosshair, quick_menu.inc)
+    std::vector<uint32_t> crosshair_pending_;
+    bool crosshair_made_ = false;
     Image quick_background_, quick_blur_, quick_full_;   // the quick menu's paused background: small, its blur's
                                                           // other half, and the frame blitted for it
     VkSampler quick_sampler_ = VK_NULL_HANDLE;
     void QuickMenu(Image& dst);
     void FpsCounter(Image& dst);
+    void VersionLabel(Image& dst);
+    void Crosshair(Image& dst);
+    bool LayerDraw(Image& dst, Image& layer, std::vector<uint32_t>& pending, uint32_t lw, uint32_t lh, bool draw,
+                   float x, float y, float vw, float vh);
+    bool TextLayerDraw(Image& dst, Image& layer, std::vector<uint32_t>& pending, bool draw, float x, float y);
+    void TextScale(const Image& dst, float* sx, float* up);
     void QuickMenuBackground(Image& dst);
     // the title's gamma ramp (D3DDevice_SetGammaRamp: its Screen Adjustment -- gamma, brightness,
     // contrast), applied as the front buffer is copied for the presenter; identity: a plain copy
@@ -443,17 +502,24 @@ private:
     float hud_cover_ = 0;      // this frame's 2D picture area, in screens
     bool hud_menu_ = false;    // the frame before was a full-screen menu (most of it 2D pictures)
     float gauge_x_[4][2] = {}, gauge_prev_[4][2] = {};   // tall HUD gauges' columns (this frame, the one before)
+    float top_left_now_ = -1e30f, top_left_prev_ = -1e30f;   // how far the top-left HUD (the health bar) reaches
+    float mid_left_now_ = -1e30f, mid_left_own_ = -1e30f, mid_left_prev_ = -1e30f;   // and the line under the karma window
     // The HUD in play on a screen not 16:9 (HudPlace): this frame's pieces, and the elements -- pieces near
     // each other, together -- of the frame before, each with the side it keeps to
     struct HudBox { float x0, x1, y0, y1; uint32_t at; };   // (at: the draw's number in its frame)
     struct HudElem { float x0, x1, y0, y1, ax, ay; uint32_t seen; bool gauge; };
     std::vector<HudBox> hud_boxes_;
+    std::vector<HudBox> hud_boxes_prev_;   // the frame before's (a piece drawn before the frame's 3D: the same quad, #219)
     std::vector<HudBox> hud_gauge_boxes_;   // the frame before's pieces of tall side gauges (hud_gauge_piece)
+    std::vector<HudBox> hud_picture_boxes_;   // the frame before's pictures about the middle (hud_picture)
     std::vector<HudElem> hud_elems_, hud_memory_;   // the frame before's; and those of the last half minute
     // the frame's last 3D draw into the back buffer (its number): the HUD is drawn after it, what is drawn in
     // screen space before it is the 3D's (mist, spray) -- not grouped as the HUD (a draw cannot know it as it
     // is made: how many 3D draws a frame has changes from frame to frame)
     uint32_t last3d_now_ = 0;
+    uint32_t last3d_prev_ = 0;   // the frame before's (the quick menu's blur under the HUD, #217)
+    bool quick_blurred_ = false; // this frame's picture blurred for the quick menu before its HUD
+    uint32_t fronts_[4] = {};    // the targets last presented (guest addresses: the game turns two or three in turn)
     float hud_box_cover_ = 0;
     // a menu over the paused game (the save statue's): the paused picture drawn this frame, and how much of
     // the screen the 2D drawn over it covers -- little, and the game shows across the screen instead of bars
@@ -468,6 +534,8 @@ private:
     int hud_panel_count_ = 0;
     HudBox hud_panel_box_{}, hud_panel_seen_{};   // the panel's box (the union of the frames it was seen in)
     void HudPlace(float x0, float x1, float y0, float y1, float w, float h, float& ax, float& ay);
+    bool hud_bottom_ = false;  // HudPlace's last piece: of an element kept to the bottom, not a gauge (a prompt)
+    bool hud_known_ = false;   // HudPlace's last piece: part of an element of the frames before (the HUD's)
     void HudGroup(float w, float h);
     int gauges_now_ = 0;
     uint32_t offscreen3d_ = 0;   // this frame's 3D draws into smaller targets (shadows, reflections, effects)
@@ -990,6 +1058,7 @@ VulkanBackend::~VulkanBackend() {
     CacheSavePipelines();
     if (shared_) {
         nv2a_vk_set_draws_off(false);
+        held_ = nullptr;
         nv2a_present_set_external(VK_NULL_HANDLE, 0, 0);
         nv2a_vk_queue_lock();
         d_.vkDeviceWaitIdle(dev_);
@@ -1009,6 +1078,8 @@ VulkanBackend::~VulkanBackend() {
         for (auto& image:glow_soft_) DestroyImage(image);
         DestroyImage(quick_background_);
         DestroyImage(fps_layer_);
+        DestroyImage(version_layer_);
+        DestroyImage(crosshair_layer_);
         DestroyImage(quick_blur_);
         DestroyImage(quick_full_);
         if (glow_soft_sampler_) d_.vkDestroySampler(dev_,glow_soft_sampler_,nullptr);
@@ -1153,7 +1224,7 @@ void VulkanBackend::EndFrame() {
         }
     }
     if (frame_ % 60 == 0) {   // once a second: textures unused for 30 s go (EvictTextures)
-        size_t gone = EvictTextures(1800);
+        size_t gone = EvictTextures(1800 * uint32_t(hold_ ? pictures_ : 1));   // (a submit a picture)
         static const bool stats = std::getenv("NGB_D3D_TEXSTATS") != nullptr;
         if (stats) {
             uint64_t bytes = 0;
@@ -1316,6 +1387,68 @@ void VulkanBackend::QuadSnap(const State& s, const Assembled& a, uint32_t count,
     c.qsnap[0] = 1.0f;
 }
 
+// Frame interpolation: after a frame without its replay (a cut, a load, the display too slow), the replay's colour
+// targets made the game's again before the next replay, so an effect building on its last picture (motion blur)
+// doesn't build on a picture from before; the replay's targets the game no longer has go.
+void VulkanBackend::FreeReplayTargets() {
+    std::vector<uint64_t> gone;
+    for (auto& [k, t] : targets_)
+        if ((k & kReplayBits) && &t != draw_rt_ && &t != bound_rt_ && &t != bound_ds_) gone.push_back(k);
+    for (uint64_t k : gone) {
+        Target& t = targets_[k];
+        Retire(t.img);
+        if (t.ms.image) Retire(t.ms);
+        if (t.fb.image) Retire(t.fb);
+        targets_.erase(k);
+    }
+    replay_stale_ = ~0u;
+}
+
+// (the current replay index's set: replay_ is set)
+void VulkanBackend::SyncReplayTargets() {
+    Begin();
+    EndRendering();
+    const uint64_t bit = ReplayKey();
+    std::vector<uint64_t> gone;
+    for (auto& [k, t] : targets_)
+        if ((k & kReplayBits) == bit && !targets_.count(k & ~kReplayBits)) gone.push_back(k);
+    for (uint64_t k : gone) {
+        Target& t = targets_[k];
+        Retire(t.img);
+        if (t.ms.image) Retire(t.ms);
+        if (t.fb.image) Retire(t.fb);
+        targets_.erase(k);
+    }
+    std::vector<uint64_t> keys;
+    for (auto& [k, t] : targets_)
+        if (!(k & kReplayBits) && !(k & 1) && t.drawn && t.img.image) keys.push_back(k);
+    for (uint64_t k : keys) {
+        Target& g = targets_.find(k)->second;   // (the map's elements stay where they are as it grows)
+        auto it = targets_.find(k | bit);
+        if (it != targets_.end() && (it->second.img.w != g.img.w || it->second.img.h != g.img.h ||
+                                     it->second.samples != g.samples || it->second.gw != g.gw || it->second.gh != g.gh)) {
+            Retire(it->second.img);
+            if (it->second.ms.image) Retire(it->second.ms);
+            if (it->second.fb.image) Retire(it->second.fb);
+            targets_.erase(it);
+            it = targets_.end();
+        }
+        Target* r = it != targets_.end() ? &it->second : MakeTarget(Surface{}, false, k | bit, g.gw, g.gh, g.img.w, g.img.h, g.samples);
+        if (!r) continue;
+        Barrier(g.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        Barrier(r->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        VkImageCopy c{};
+        c.srcSubresource = c.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        c.extent = {g.img.w, g.img.h, 1};
+        d_.vkCmdCopyImage(cmd_, g.img.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, r->img.image,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+        r->drawn = true;
+        r->ms_stale = r->samples > 1;
+        r->stamp = g.stamp;
+        r->stamped = g.stamped;
+    }
+}
+
 void VulkanBackend::Retire(Image& img, VkImageView extra) {
     graveyard_.push_back({img, extra, frame_});
     img = Image{};
@@ -1436,7 +1569,7 @@ Target* VulkanBackend::EnsureTarget(const Surface& s, bool depth) {
     if (!depth && w==128 && h==128 && ContinuousGlowEnabled() && glow_targets_.count(s.data))
         scale=GlowTargetScale(uint32_t(scale_));
     uint32_t iw = w * scale, ih = h * scale;
-    uint64_t key = uint64_t(s.data) << 1 | (depth ? 1 : 0);
+    uint64_t key = uint64_t(s.data) << 1 | (depth ? 1 : 0) | ReplayKey();
     auto it = targets_.find(key);
     // MSAA (a quality setting) for the display-sized targets: the 3D and what is drawn over it
     uint32_t samples = big ? uint32_t(msaa_) : 1;
@@ -1556,6 +1689,7 @@ void VulkanBackend::FillMs(Target& t) {
 }
 
 void VulkanBackend::VisibilityEnd(uint32_t report_va) {
+    if (replay_) return;
     vis_on_ = false;
     vis_end_[slot_].push_back({vis_test_, report_va});
 }
@@ -1989,7 +2123,7 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
     info.rect = d.linear;
     // a render target read as a texture
     // (targets are keyed by the surface's physical address, the description has the virtual one)
-    auto tit = targets_.find(uint64_t(d.data & 0x7FFFFFFFu) << 1 | (fi.depth ? 1 : 0));
+    auto tit = targets_.find(uint64_t(d.data & 0x7FFFFFFFu) << 1 | (fi.depth ? 1 : 0) | ReplayKey());
     // A bump map (V8U8: nothing renders into that) or a mip chain is never a target: the game has put a
     // texture where it once drew, and the target left behind is not it (#16: the pond's ripple maps,
     // read as the target that memory had held, a picture of something else).
@@ -2010,8 +2144,19 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
             Retire(t.img);
             if (t.ms.image) Retire(t.ms);
             if (t.fb.image) Retire(t.fb);
+            const uint64_t base = tit->first & ~kReplayBits;   // the other passes' (frame interpolation) go too
             targets_.erase(tit);
             tit = targets_.end();
+            for (uint64_t i = 0; i < 4; i++) {
+                auto tw = targets_.find(base | i << 61);
+                if (tw != targets_.end() && &tw->second != draw_rt_ && &tw->second != bound_rt_ &&
+                    &tw->second != bound_ds_) {
+                    Retire(tw->second.img);
+                    if (tw->second.ms.image) Retire(tw->second.ms);
+                    if (tw->second.fb.image) Retire(tw->second.fb);
+                    targets_.erase(tw);
+                }
+            }
         }
     }
     if (tit != targets_.end() && !d.cube && d.depth == 1 && never_target) {
@@ -2695,6 +2840,28 @@ void VulkanBackend::CaptureQuick(QuickPeek& q) {
                 std::memcpy(&q.fps_px[size_t(y) * kFpsWidth], &px[size_t(y) * w], sizeof(uint32_t) * std::min(w, kFpsWidth));
         }
     }
+    q.version = ngb_version_shown();
+    q.version_px.clear();
+    if (q.version) {
+        static unsigned serial;
+        static std::vector<uint32_t> px(size_t(kFpsWidth) * kFpsHeight);
+        int w, h;
+        if (ngb_version_picture(px.data(), px.size(), &w, &h, &serial)) {
+            q.version_px.assign(px.size(), 0);
+            q.version_w = std::min(w, kFpsWidth);
+            q.version_h = std::min(h, kFpsHeight);
+            for (int y = 0; y < q.version_h; y++)
+                std::memcpy(&q.version_px[size_t(y) * kFpsWidth], &px[size_t(y) * w], sizeof(uint32_t) * q.version_w);
+        }
+    }
+    q.crosshair = uint8_t(ngb_bow_aiming());
+    q.crosshair_px.clear();
+    static bool crosshair_made;   // (the title's thread: made once, the game's files read)
+    if (q.crosshair && !crosshair_made) {
+        q.crosshair_px.resize(size_t(kCrosshairSize) * kCrosshairSize);
+        crosshair_made = ngb_crosshair_picture(q.crosshair_px.data(), kCrosshairSize) != 0;
+        if (!crosshair_made) q.crosshair_px.clear();
+    }
     q.percent = ngb_pc_setting(20);
     q.frozen = 0;
     q.layer.clear();
@@ -2815,6 +2982,38 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     draw_rt_ = rt;
     for (int i = 0; i < 4; i++) views[i] = BindTexture(s, i, info[i], from_target[i]);
     draw_rt_ = nullptr;
+    // A picture drawn at the render scale shrunk into a target at a smaller one -- the glow's chain: its 256x128 at
+    // the render scale into its 128x128 at 1x -- was read once per pixel, a few texels of the many under it: above
+    // 1x bright spots came and went as the camera moved (#213). Such a read now averages the texels under the pixel
+    // (spreadtap: as many taps per axis as the one scale is to the other, at most 8), as the console's sizes would
+    // have it; akirahayabusa's ngb-pc-native-port averages its glow chain the same way. NGB_D3D_NO_WIDE=1: one read.
+    float wide[4][4] = {};
+    {
+        static const bool no_wide = std::getenv("NGB_D3D_NO_WIDE") != nullptr;
+        float dst = rt && rt->gw ? float(rt->img.w) / float(rt->gw) : 1.0f;
+        for (int i = 0; i < 4 && !no_wide; i++) {
+            TextureDesc d;
+            if (!from_target[i] || info[i].shadow || info[i].kind != kTex2D || !s.textures[size_t(i)] ||
+                !Describe(s.textures[size_t(i)], d))
+                continue;
+            auto tit = targets_.find(uint64_t(d.data & 0x7FFFFFFFu) << 1 | ReplayKey());
+            if (tit == targets_.end() || !tit->second.gw || &tit->second == rt)
+                continue;
+            const Target& src = tit->second;
+            float ratio = float(src.img.w) / float(src.gw) / dst;
+            if (ratio < 1.75f || !rt || src.gw <= rt->gw)
+                continue;   // (a shrink only: the glow drawn back over the screen, from its smaller target, is not)
+            float n = std::min(8.0f, std::round(ratio));
+            info[i].flags |= kTexWide;
+            wide[i][0] = 1.0f / float(src.img.w);
+            wide[i][1] = 1.0f / float(src.img.h);
+            wide[i][2] = n;
+            static int told;
+            if (told++ < 4)
+                std::fprintf(stderr, "[D3D] %ux%u at %.0fx read into %ux%u at %.0fx: %.0fx%.0f taps\n", src.gw, src.gh,
+                             float(src.img.w) / float(src.gw), rt ? rt->gw : 0, rt ? rt->gh : 0, dst, n, n);
+        }
+    }
     for (int i = 0; i < 4 && quad; i++)   // a screen quad's linearly filtered textures (QuadSnap's alpha weighting)
         if (info[i].kind == kTex2D && !info[i].shadow && (s.tss[size_t(i)][kTssMagFilter] >= 2 || aniso_level_ > 0))
             info[i].flags |= kTexLinear;
@@ -2839,6 +3038,24 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     if (noshadow && (info[0].shadow || info[1].shadow || info[2].shadow || info[3].shadow)) return;
     PixelKey pk = MakePixelKey(s, info);
     pk.quad = quad;
+    // The heat haze over lava -- fixed-function sprites blended by their alpha, reading a 512x256 copy of the
+    // screen on stage 0 at projected coordinates, clamped -- reads a little past the copy's right edge; clamped there,
+    // the last column ran down the right of the screen as a streaky band, the console's too (#55). Near the copy's
+    // edges the haze's move toward the edge fades out (the shader, TexFetch's caller): it is drawn up to the edge,
+    // less moved, and never reads past the picture (left out there instead, as akirahayabusa's ngb-pc-native-port
+    // does, the strip had no haze; mirrored, it showed the picture's mirror). The draws are found as his are:
+    // fixed-function stages reading a colour target at projected, clamped coordinates. NGB_D3D_HAZE_CLAMP=1: as the
+    // console.
+    static const bool haze_clamp = std::getenv("NGB_D3D_HAZE_CLAMP") != nullptr;
+    if (!haze_clamp && !pk.programmable && SimpleState(s, kMBlendEnable) && SimpleState(s, kMSrcBlend) == 0x302 &&
+        SimpleState(s, kMDestBlend) == 0x303)
+        for (int i = 0; i < 4; i++)
+            if (from_target[i] && !info[i].shadow && info[i].kind == kTex2D && ((pk.proj >> i) & 1) &&
+                s.tss[size_t(i)][kTssAddressU] == 3 && s.tss[size_t(i)][kTssAddressV] == 3) {
+                pk.alphakill |= 1u << (4 + i);
+                static bool told;
+                if (!told) { told = true; std::fprintf(stderr, "[D3D] heat haze: its move faded out at the picture's edges\n"); }
+            }
     if (sprite && !pk.programmable) {   // stage 3 alone, whatever the stages before it hold (PixelHlsl)
         const auto& t = s.tss[3];
         uint32_t v[9] = {t[kTssColorOp], t[kTssColorArg1], t[kTssColorArg2], t[kTssColorArg0], t[kTssAlphaOp],
@@ -2963,7 +3180,23 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
         }
         if (a.topology == Topology::Triangles && SimpleState(s, kMSolidOffsetEnable)) {
             k.zbias = int32_t(std::lround(Bits(SimpleState(s, kMDepthOffset)) * 16777215.0f / s.zscale));
-            k.zslope = Bits(SimpleState(s, kMSlopeScale));
+            // The slope part is in the console's pixels: depth changes per pixel as the triangle is drawn, at the
+            // render scale a fraction of what it is per console pixel, so the bias at it the same fraction -- the
+            // lava light laid over the cave walls (blended, depth test LEQUAL) fell back onto the walls above 1x and
+            // fought them in a flicker of specks (#213). At the target's scale, as the pull below.
+            const Target* zt = rt ? rt : ds;   // (a depth-only pass: its depth target's scale)
+            float zs = zt ? float(zt->img.w) / float(std::max<uint32_t>(zt->gw, 1)) : 1.0f;
+            k.zslope = Bits(SimpleState(s, kMSlopeScale)) * std::max(zs, 1.0f);
+            // and three times the game's slope part where nothing writes depth (#213): the lava light laid over the
+            // cave walls specked at grazing angles, its margin too small (twice left a few in the Magma and Ice
+            // Caverns); what writes depth (shadow casters) as the game
+            // sets it. NGB_D3D_ZSLOPE_X=<n>: n times instead (1: as the game sets it; kept within 1..8)
+            static const float zslope_x = [] {
+                const char* e = std::getenv("NGB_D3D_ZSLOPE_X");
+                float x = e ? float(std::atof(e)) : 3.0f;
+                return x >= 1.0f && x <= 8.0f ? x : (e ? 1.0f : 3.0f);
+            }();
+            if (!k.zwrite) k.zslope *= zslope_x;
         }
         if (SectionPull() > 0 && a.topology == Topology::Triangles && k.zen && k.has_ds) {   // a pull of 0 turns it off
             // by the vertex buffer (its header in the towers' chunk), not the texture: every pass over the same mesh -- the
@@ -3040,7 +3273,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
         }
     }
     bool continuous_composite=glow_pass &&
-        continuous_record_[2].frame==presents_ && continuous_record_[2].data==(glow_desc.data&0x7FFFFFFFu);
+        continuous_record_[2].frame==frame_ && continuous_record_[2].data==(glow_desc.data&0x7FFFFFFFu);
     glow_pass=continuous_composite;
     if (glow_pass && GlowStrength()<1.0f) {
         async_now_=false;
@@ -3062,10 +3295,26 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
         return;
     }
     if (glow_pass && GlowSoftenMode()) {
-        auto source=targets_.find(uint64_t(glow_desc.data&0x7FFFFFFFu)<<1);
+        auto source=targets_.find(uint64_t(glow_desc.data&0x7FFFFFFFu)<<1 | ReplayKey());
         if (source==targets_.end() || !SoftenGlow(source->second.img))
             ngb_renderer_fatal("Could not create the glow softening pass.");
         views[0]=glow_soft_[1].view;
+    }
+    // The quick menu with the game paused (Quick Menu Pause): the picture blurred and dimmed before the HUD is drawn
+    // over it -- at the first draw into the back buffer after the frame before's last 3D draw (the paused game draws
+    // the same frame each time) -- so the health, Ninpo, karma and the projectile's count stay sharp (#217). A frame
+    // that never gets there is blurred whole at the present, as before. NGB_QUICK_BLUR_ALL=1: always whole.
+    static const bool blur_all = std::getenv("NGB_QUICK_BLUR_ALL") != nullptr;
+    // (the menu still open now -- the frame after it closes is not blurred; and into the target presented)
+    if (!blur_all && qk_.frozen && !quick_blurred_ && rt && rt->gw >= 640 &&
+        (s.rt.data == fronts_[0] || s.rt.data == fronts_[1] || s.rt.data == fronts_[2] || s.rt.data == fronts_[3]) &&
+        last3d_prev_ && st_.drawn >= last3d_prev_ && ngb_quick_frozen()) {
+        EndRendering();
+        QuickMenuBackground(rt->img);
+        if (rt->samples > 1) rt->ms_stale = true;
+        quick_blurred_ = true;
+        static bool told;
+        if (!told) { told = true; std::fprintf(stderr, "[QUICK] background blurred before the HUD (draw %u)\n", st_.drawn); }
     }
     st_.drawn++;
 
@@ -3121,6 +3370,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 c.texsize[i][3] = -0.5f / float(d.height);
             }
         }
+        std::memcpy(c.spread[i], wide[i], sizeof(wide[i]));
         const auto& t = s.tss[size_t(i)];
         c.bump[i][0] = Bits(t[kTssBumpEnvMat00]);
         c.bump[i][1] = Bits(t[kTssBumpEnvMat01]);
@@ -3136,9 +3386,9 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     if (glow_pass) c.bump[3][2]=GlowStrength(); // unused by this single-texture draw
     // The 2D (screen-space draws into the back buffer) on a wider screen. The game's 2D screens -- menus,
     // the title, chapter cards (src/pc_menu.c says which) -- in its 16:9 look, stretched no wider than 16:9,
-    // or with Menus 4:3 the console's 4:3 picture in the middle. In play its HUD and words in their own
-    // shape (ngb_hud_shape: 4:3 over the screen's shape): the top of the screen's HUD keeps to its corners
-    // and everything else is narrowed alike about the middle (words and subtitles are drawn in pieces);
+    // or with Menus 4:3 the console's 4:3 picture in the middle. In play stretched alike, the HUD's elements
+    // to the screen's sides and corners (HudPlace); with HUD Aspect Corrected those elements in their own
+    // shape (ngb_hud_shape: 4:3 over the screen's shape), words and subtitles stretched as the menus;
     // what spans the screen (fades, letterbox bars) and what is off it as drawn.
     float hud_clip0 = -1, hud_clip1 = -1;   // a menu's 4:3 area (guest pixels), the draw clipped to it
     float hud_clipy0 = -1, hud_clipy1 = -1;   // (and its height, on a narrower screen)
@@ -3262,6 +3512,32 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                     }
                 }
             }
+            // HUD Style Compact (#121): in play only -- 3D drawn, not a menu -- and only the HUD's pieces: a
+            // piece of an element of the frames before (HudPlace: the 3D's screen-space pieces, mist and spray, are never
+            // grouped), or a new one after the frame before's last 3D draw (draw counts change frame to frame, so the
+            // known elements do not go by the count, or the health bar went big and small)
+            // (play: this frame's 3D drawn so far, or the frame before's -- the karma window's figures are at times drawn
+            // before any of the frame's 3D, during the Talisman of Rebirth, and went full size apart from its words, #219;
+            // before the frame's 3D only an element's pieces of the frame before, not a 2D screen's first frame)
+            const bool play3d = threed_ >= 30 || threed_prev_ >= 30;
+            // (what is kept as the HUD's for the frames after: play's pieces only -- not a screen with no 3D, as a shop's,
+            // from its second frame on, whose own pieces would then be known the frame after)
+            const bool keep_box = play3d;
+            const bool live = !ScreenFrame(threed_);
+            const bool compact = ngb_pc_setting(41) && play3d;
+            // (before the frame's 3D, only the same quad as a piece of the HUD of the frame before -- the karma window's
+            // figures; never a 2D screen's first frame, a chapter's card where the window was)
+            auto same_quad = [&] {
+                for (const HudBox& b : hud_boxes_prev_)
+                    if (std::fabs(b.x0 - x0) <= 2 && std::fabs(b.x1 - x1) <= 2 && std::fabs(b.y0 - y0) <= 2 &&
+                        std::fabs(b.y1 - y1) <= 2)
+                        return true;
+                return false;
+            };
+            auto hud_piece = [&] {
+                return (hud_known_ || (last3d_prev_ && st_.drawn >= last3d_prev_)) &&
+                       (threed_ >= 30 || (hud_known_ && threed_prev_ >= 30 && same_quad()));
+            };
             if (pk_.stretched) {
                 // The game's 2D in its widescreen mode, the console's 16:9 look, kept 16:9: on a wider screen
                 // (21:9) narrowed to the middle 16:9 (kx), on a narrower one (16:10) shortened to it (ky);
@@ -3275,16 +3551,31 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 if (!ScreenFrame(threed_) && (rt_tex || (x1 - x0 >= w * 0.85f && y1 - y0 >= h * 0.75f))) spans = true;
                 static int centred = -1;
                 if (centred < 0) centred = std::getenv("NGB_HUD_CENTER") != nullptr;
+                // HUD Style Compact: in play the elements kept to a side or a corner drawn smaller toward it, so nearer
+                // the screen's edges; those about the middle across (subtitles, a message box) as they are
+                const float small = compact ? 0.8f : 1.0f;
+                // HUD Aspect Corrected (#220, setting 42; NGB_HUD_FIXED=1 too): the game kept in its widescreen mode as
+                // with Stretched, every screen drawn alike -- only the HUD's elements, each about its side or corner, in
+                // their own 4:3 shape (k of the screen's width) and no taller. Play in the 4:3 mode, its screens in the
+                // widescreen mode, drew the messages, the letters and Game Over another size for a frame either way (#219)
+                static const bool hud_env = std::getenv("NGB_HUD_FIXED") != nullptr;
+                // (in play only, as Compact: the first frame of a 2D screen, Game Over or a chapter's card, before it is
+                // known as one, is not narrowed where the HUD was -- hud_piece)
+                const bool shaped = (hud_env || ngb_pc_setting(42)) && play3d;
                 if (n && ky < 0.999f && !paused && !spans) {
                     float ax = w / 2, ay = h / 2;
-                    if (!ScreenFrame(threed_) && !centred) {
+                    if (live && !centred) {
                         HudPlace(x0, x1, y0, y1, w, h, ax, ay);
-                        if (x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
+                        if (keep_box && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
                             hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
                     }
-                    c.ext[0] = 1;
-                    c.ext[1] = w / 2;
-                    c.ext[2] = ky;
+                    bool cornered = live && !centred && ax != w / 2 && hud_piece();
+                    // (what keeps to the bottom -- the "Interact" prompt -- as Stretched draws it: the game draws over it
+                    // where it put it, Muramasa's board as Interact is pressed, over the held picture, #219)
+                    const bool shape = cornered && !hud_bottom_;
+                    c.ext[0] = shape && shaped ? k * small : shape && small < 1 ? small : 1;
+                    c.ext[1] = shape && (small < 1 || shaped) ? ax : w / 2;
+                    c.ext[2] = shape && shaped ? small : ky * (shape ? small : 1);
                     c.ext[3] = ay;
                     if (ax == w / 2 && ay == h / 2) {
                         hud_clipy0 = h / 2 * (1 - ky);
@@ -3295,29 +3586,60 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                     c.ext[1] = w / 2;
                     // In play the HUD's elements to the screen's sides (HudPlace). NGB_HUD_CENTER=1: all about
                     // the middle.
-                    if (!centred && !ScreenFrame(threed_)) {
+                    if (!centred && live) {
                         float ax = w / 2, ay = h / 2;
                         HudPlace(x0, x1, y0, y1, w, h, ax, ay);
                         c.ext[1] = ax;
-                        if (x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
+                        if ((small < 1 || shaped) && ax != w / 2 && !hud_bottom_ && hud_piece()) {
+                            c.ext[0] = (shaped ? k : km) * small;
+                            c.ext[2] = small;
+                            c.ext[3] = ay;
+                        }
+                        if (keep_box && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
                             hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
                     }
                     if (c.ext[1] == w / 2) {   // (a corner's piece is on the screen as narrowed: not clipped)
                         hud_clip0 = w / 2 * (1 - km);
                         hud_clip1 = w / 2 * (1 + km);
                     }
+                } else if (n && (small < 1 || shaped) && !paused && !spans && !centred && live) {
+                    // 16:9: nothing to narrow, the HUD's elements only smaller toward their sides (and Corrected, narrower)
+                    float ax = w / 2, ay = h / 2;
+                    HudPlace(x0, x1, y0, y1, w, h, ax, ay);
+                    if (keep_box && x1 - x0 < w * 0.89f && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
+                        hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
+                    if (ax != w / 2 && !hud_bottom_ && hud_piece()) {
+                        c.ext[0] = (shaped ? k : 1.0f) * small;
+                        c.ext[1] = ax;
+                        c.ext[2] = small;
+                        c.ext[3] = ay;
+                    }
                 }
             } else if (n && k < 0.999f && !paused &&
-                       (ScreenFrame(threed_) || ((hud_menu_ || hud_cover_ >= 0.5f) && threed_ < 30))) {
+                       (ScreenFrame(threed_) || ((hud_menu_ || hud_cover_ >= 0.5f) && threed_ < 30) ||
+                        (covered_now_ && !rt_tex && !(!s.textures[0] && x0 <= 1 && x1 >= w - 1)))) {
+                // (and an item's or a tip's screen over play, drawn over an opaque cover: its tiles together, not
+                // each to a corner as the HUD's -- they parted, a seam down it, with HUD Aspect Corrected; the cover
+                // itself, a fade's black, across the screen as drawn)
                 // A 2D screen in the game's 4:3 mode (Menus 4:3; or the first frame of one, before the game
                 // switches): the console's 4:3 picture, all of it narrowed alike about the middle and clipped
                 // there, black beyond (its pieces -- tiles, scrolling layers reaching off the screen -- only
                 // line up drawn alike)
-                c.ext[0] = k;
-                c.ext[1] = w / 2;
-                hud_clip0 = w / 2 * (1 - k);
-                hud_clip1 = w / 2 * (1 + k);
+                // An item's or a tip's screen over play (the cover's, not a menu's): as with HUD Aspect Stretched
+                const bool over_play = !ScreenFrame(threed_) && !((hud_menu_ || hud_cover_ >= 0.5f) && threed_ < 30);
+                // (over play as with Stretched: what covers most of the screen, the background, across it; the
+                // rest -- the item, its name, the panel -- in the middle 16:9)
+                const bool fills = over_play && x1 - x0 >= w * 0.85f && y1 - y0 >= h * 0.75f;
+                const float kk = over_play ? std::min(1.0f, k * 4.0f / 3.0f) : k;
+                if (!fills && kk < 0.999f) {
+                    c.ext[0] = kk;
+                    c.ext[1] = w / 2;
+                    hud_clip0 = w / 2 * (1 - kk);
+                    hud_clip1 = w / 2 * (1 + kk);
+                }
             } else if (n && k < 0.999f && !rt_tex && x1 - x0 < w * 0.89f && x1 > 0 && x0 < w) {
+                // (the game's 4:3 mode on a wide screen: since HUD Aspect Corrected keeps the widescreen mode (#219),
+                // only with NGB_MENUS_43=1 -- the notes below are of the Corrected that played in the 4:3 mode)
                 // the HUD along the top (the health bar, ninpo, the projectile icon under them) keeps to
                 // its corner as on a 4:3 screen: narrowed toward the left edge, or the right edge for
                 // what starts in the right part; everything lower (words, Game Over, subtitles, area
@@ -3334,8 +3656,62 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
                 for (int g = 0; g < 4 && !gauge; g++)
                     if (x1 - x0 < w * 0.1f && y0 > h * 0.25f && x1 > gauge_prev_[g][0] - 4 && x0 < gauge_prev_[g][1] + 4)
                         gauge = true;
-                c.ext[1] = y1 < h * 0.3f ? (x0 < w * 0.7f ? 0.0f : w)
+                // what has its middle in a side's outer 30%, starts above 45% of the height and reaches below 30%
+                // (#219): the explosive arrows' fire at the icon's tip, the hit counter's flash as a combo ends,
+                // Missions' Kill and Time panel (its frames, words and figures alike) -- to that side's corner with
+                // what is above it; about the middle the fire and the flash were drawn away from their icon. Not a
+                // gauge or a picture over play; what is lower (an area's name) or further in as before
+                const float cxm = (x0 + x1) / 2;
+                const bool own = y1 >= h * 0.3f && y0 < h * 0.45f && (cxm < w * 0.3f || cxm > w * 0.7f) && !gauge &&
+                                 !hud_picture(x0, x1, y0, y1, w, h);
+                // and what continues such a line from the left, its letters drawn left to right (the Ultimate
+                // Technique's bonus: "Ultimate Techniq" kept to the corner, "ues" past 30% about the middle) -- this
+                // frame's line, or the frame before's own pieces only (what joined never holds itself there)
+                // (beside the line's end, a letter or a word: not a box or the 3D's mist across the band. Not by
+                // the draw count against the frame before's 3D -- a frame with less 3D drew the HUD earlier, and the
+                // last letters went about the middle for it, a flicker)
+                // Only lines of words and the panel's lines (thin) say where the line ends: a mist sheet kept to the
+                // corner as before, but its far edge is no line's.
+                const bool thin = y1 - y0 < h * 0.08f;
+                const float line_end = std::max(mid_left_now_, mid_left_prev_);
+                const bool cont = !own && thin && y1 >= h * 0.3f && y0 < h * 0.45f && x0 < w / 2 && !gauge &&
+                                  x1 - x0 < w * 0.1f && x0 <= line_end + 4 && x0 >= line_end - w * 0.03f;
+                const bool reach = own || cont;
+                if (own && thin && cxm < w / 2) mid_left_own_ = std::max(mid_left_own_, x1);
+                if ((own && thin && cxm < w / 2) || cont) mid_left_now_ = std::max(mid_left_now_, x1);
+                // (along the top, what continues the health bar from the left -- its end, with the longer bar of
+                // the Life of the Gods past 70% of the width -- stays with it, not alone in the right corner)
+                const bool top_left = y1 < h * 0.3f &&
+                                      (x0 < w * 0.7f || x0 <= std::max(top_left_now_, top_left_prev_) + 4);
+                // (only the top-left HUD itself extends it -- starting in the left 30%, a thin band as the bar, so not
+                // the 3D's screen-space mist and spray; not by the draw count against the frame before's 3D, which
+                // failed on frames with less 3D -- one step past it, never a chain: what joined would hold itself there)
+                if (y1 < h * 0.3f && x0 < w * 0.3f && y1 - y0 < h * 0.08f)
+                    top_left_now_ = std::max(top_left_now_, x1);
+                c.ext[1] = y1 < h * 0.3f ? (top_left ? 0.0f : w)
+                         : reach ? (cont || cxm < w / 2 ? 0.0f : w)
                          : gauge && x1 < w * 0.3f ? 0.0f : gauge && x0 > w * 0.7f ? w : w / 2;
+                // HUD Style Compact (#121): what keeps to a side smaller toward it, and toward the top along the top
+                if (compact && c.ext[1] != w / 2) {
+                    c.ext[0] = k * 0.8f;
+                    c.ext[2] = 0.8f;
+                    c.ext[3] = y1 < h * 0.3f || reach ? 0.0f : h / 2;   // (what reaches lower with its corner: #219)
+                }
+            } else if (n && compact && !rt_tex && !paused && !ScreenFrame(threed_) && x1 - x0 < w * 0.89f &&
+                       x1 > 0 && x0 < w) {
+                // HUD Style Compact (#121) on the game's own 4:3 screen, nothing narrowed: the HUD's elements (as
+                // HudPlace groups them, the karma window whole) kept to a side or a corner smaller toward it; those
+                // about the middle (words, subtitles) as drawn
+                float ax = w / 2, ay = h / 2;
+                HudPlace(x0, x1, y0, y1, w, h, ax, ay);
+                if (keep_box && y1 - y0 < h * 0.9f && hud_boxes_.size() < 2048)
+                    hud_boxes_.push_back({x0, x1, y0, y1, st_.drawn});
+                if (ax != w / 2 && !hud_bottom_ && hud_piece()) {   // (the bottom's prompt as drawn, as above)
+                    c.ext[0] = 0.8f;
+                    c.ext[1] = ax;
+                    c.ext[2] = 0.8f;
+                    c.ext[3] = ay;
+                }
             }
         }
     }
@@ -3721,7 +4097,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
             static uint32_t dumped_frame;
             if (!dump_dir_.empty() && dumped_frame != presents_) {
                 dumped_frame = presents_;
-                auto tit = targets_.find(uint64_t(d0.data & 0x7FFFFFFFu) << 1 | 1);
+                auto tit = targets_.find(uint64_t(d0.data & 0x7FFFFFFFu) << 1 | 1 | ReplayKey());
                 if (tit != targets_.end()) {
                     char name[64];
                     std::snprintf(name, sizeof(name), "step_%05u_%04u_shadowmap", presents_, st_.drawn);
@@ -3822,7 +4198,8 @@ void VulkanBackend::Dump(Target& t, const char* name) {
     if (name)
         std::snprintf(path, sizeof(path), "%s/%s.ppm", dump_dir_.c_str(), name);
     else
-        std::snprintf(path, sizeof(path), "%s/frame_%05u.ppm", dump_dir_.c_str(), presents_);
+        std::snprintf(path, sizeof(path), "%s/frame_%05u%s.ppm", dump_dir_.c_str(), presents_,
+                      !replay_ ? "" : replay_index_ == 1 ? "i" : replay_index_ == 2 ? "i2" : "i3");
     if (FILE* f = std::fopen(path, "wb")) {
         std::fprintf(f, "P6\n%u %u\n255\n", t.img.w, t.img.h);
         const uint8_t* p = static_cast<const uint8_t*>(info.pMappedData);
@@ -3869,7 +4246,16 @@ static void hud_side(float x0, float x1, float y0, float y1, float w, float h, f
     float cx = (x0 + x1) / 2;
     ax = std::fabs(cx - w / 2) < w * 0.12f ? w / 2 : cx < w / 2 ? 0.0f : w;
     bool top = y0 < h * 0.25f, bottom = y1 > h * 0.75f;
+    // along the top, by the edge it starts from: the health bar grown long (its middle near the screen's, #219)
+    // still the left's -- near one edge, much farther from the other (what is about the middle is as far from both)
+    float gl = std::max(x0, 0.0f), gr = std::max(w - x1, 0.0f);   // (what reaches past both sides: about the middle)
+    if (ax == w / 2 && top && !bottom) ax = gl < w * 0.15f && gl * 2 < gr ? 0.0f : gr < w * 0.15f && gr * 2 < gl ? w : ax;
     ay = top && !bottom ? 0.0f : bottom && !top ? h : h / 2;
+}
+
+// A picture over play (HudPlace): not a tall gauge, taller than 30% of the height
+static bool hud_picture(float x0, float x1, float y0, float y1, float w, float h) {
+    return y1 - y0 > h * 0.3f && x1 - x0 >= w * 0.1f;
 }
 
 // A tall gauge at a side (the breath bar under water), or a piece in its column (its caps, its fill however
@@ -3885,6 +4271,8 @@ static bool hud_gauge_piece(float x0, float x1, float y0, float y1, float w, flo
 // its middle); a piece new this frame, along the top by its own box (the health bar as it appears), else
 // about the middle until the next frame groups it.
 void VulkanBackend::HudPlace(float x0, float x1, float y0, float y1, float w, float h, float& ax, float& ay) {
+    hud_known_ = false;
+    hud_bottom_ = false;
     // a screen of panels drawn over the game (a chapter's clear, an item's picture) whole, about the middle, as
     // a 2D screen
     float cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, best = 1e30f;
@@ -3893,10 +4281,34 @@ void VulkanBackend::HudPlace(float x0, float x1, float y0, float y1, float w, fl
         ay = h / 2;
         return;
     }
+    // a picture over play, taller than the HUD's pieces (the karma window's, the tallest, 134): the Talisman of
+    // Rebirth's, about the middle and breaking to the corners (#219) -- as drawn, never an element's
+    if (hud_picture(x0, x1, y0, y1, w, h)) {
+        ax = w / 2;
+        ay = h / 2;
+        return;
+    }
+    // The two rules below (a picture's words, a panel's labels) skip what is in an element of the frame before kept
+    // to a top corner from the screen's edge, and no larger than the karma window: the window and the health bar.
+    // The Talisman of Rebirth's picture and flash, about the middle and as large as a panel, reach over the window,
+    // and its figures were drawn as the picture's, apart from its words (#219); a panel's own labels start further in.
+    bool sided = false;
+    for (const HudElem& e : hud_elems_)
+        if (!e.gauge && e.ay == 0.0f && (e.ax == 0.0f ? e.x0 < w * 0.1f : e.ax == w && e.x1 > w * 0.9f) &&
+            e.x1 - e.x0 < w * 0.6f && e.y1 < h * 0.5f &&
+            cx >= e.x0 && cx <= e.x1 && cy >= e.y0 && cy <= e.y1)
+            sided = true;
+    // what is on a picture about the middle (hud_picture_boxes_: a window's words) with it
+    for (const HudBox& p : hud_picture_boxes_)
+        if (!sided && cx >= p.x0 && cx <= p.x1 && cy >= p.y0 && cy <= p.y1) {
+            ax = w / 2;
+            ay = h / 2;
+            return;
+        }
     // what is inside a panel screen's panel (its labels and figures, wherever in it) about the middle with it;
     // the HUD around it (the health bar, karma, prompts) where it is
-    if (hud_panel_ && cx >= hud_panel_box_.x0 - 8 && cx <= hud_panel_box_.x1 + 8 && cy >= hud_panel_box_.y0 - 8 &&
-        cy <= hud_panel_box_.y1 + 8) {
+    if (hud_panel_ && !sided && cx >= hud_panel_box_.x0 - 8 && cx <= hud_panel_box_.x1 + 8 &&
+        cy >= hud_panel_box_.y0 - 8 && cy <= hud_panel_box_.y1 + 8) {
         ax = w / 2;
         ay = h / 2;
         return;
@@ -3917,23 +4329,28 @@ void VulkanBackend::HudPlace(float x0, float x1, float y0, float y1, float w, fl
         }
         gauge = column && !other;
     }
+    // (never a picture's element kept to a side's middle, which a piece of the HUD is not -- the Talisman of
+    // Rebirth's, sliding in from the left, was the smallest around the karma window's lower lines and took them to
+    // its own height, apart from "Karma", #219. The karma window is as large, but kept to the top)
     const HudElem* hit = nullptr;
     for (const HudElem& e : hud_elems_) {
-        if (e.gauge != gauge) continue;
+        if (e.gauge != gauge || (e.ay != 0.0f && hud_picture(e.x0, e.x1, e.y0, e.y1, w, h))) continue;
         if (cx < e.x0 - 2 || cx > e.x1 + 2 || cy < e.y0 - 2 || cy > e.y1 + 2) continue;
         float area = (e.x1 - e.x0) * (e.y1 - e.y0);
         if (area < best) { best = area; hit = &e; }
     }
     if (!hit)   // an element come back (a prompt shown again): where it was within the last half minute
         for (const HudElem& e : hud_memory_) {
-            if (e.gauge != gauge) continue;
+            if (e.gauge != gauge || (e.ay != 0.0f && hud_picture(e.x0, e.x1, e.y0, e.y1, w, h))) continue;
             if (cx < e.x0 - 2 || cx > e.x1 + 2 || cy < e.y0 - 2 || cy > e.y1 + 2) continue;
             float area = (e.x1 - e.x0) * (e.y1 - e.y0);
             if (area < best) { best = area; hit = &e; }
         }
     if (hit) {
+        hud_bottom_ = hit->ay == h && !hit->gauge;
         ax = hit->ax;
         ay = hit->ay;
+        hud_known_ = true;
         return;
     }
     hud_side(x0, x1, y0, y1, w, h, ax, ay);
@@ -3943,6 +4360,8 @@ void VulkanBackend::HudPlace(float x0, float x1, float y0, float y1, float w, fl
 // Each frame's end: this frame's HUD pieces into elements -- pieces within a few pixels of each other (the
 // letters of a word, a gauge, its caps and the words under it), together -- each with its side.
 void VulkanBackend::HudGroup(float w, float h) {
+    hud_boxes_prev_.assign(hud_boxes_.begin(), hud_boxes_.end());   // (all of them: those before the 3D too, same_quad)
+    last3d_prev_ = last3d_now_;
     // only what was drawn after the 3D: the HUD (the 3D's screen-space pieces are not the HUD's)
     if (last3d_now_)
         hud_boxes_.erase(std::remove_if(hud_boxes_.begin(), hud_boxes_.end(),
@@ -3958,7 +4377,7 @@ void VulkanBackend::HudGroup(float w, float h) {
     auto root = [&](int i) { while (up[size_t(i)] != i) i = up[size_t(i)] = up[size_t(up[size_t(i)])]; return i; };
     const float gx = 10, gy = 14;
     // the tall gauges, then the pieces in their columns drawn with them (hud_gauge_piece; a few draws
-    // apart -- not a window's letters sliding across): grouped only among themselves
+    // apart -- not a window's letters sliding across -- or the fill at the tube's foot): grouped only among themselves
     std::vector<char> gauge(n, 0);
     for (size_t i = 0; i < n; i++) {
         const HudBox& b = hud_boxes_[i];
@@ -3967,11 +4386,21 @@ void VulkanBackend::HudGroup(float w, float h) {
     for (size_t i = 0; i < n; i++)
         for (size_t j = 0; j < n && !gauge[i]; j++) {
             const HudBox &b = hud_boxes_[i], &g = hud_boxes_[j];
-            if (j != i && g.y1 - g.y0 > h * 0.15f && g.x1 - g.x0 < w * 0.1f && b.at + 6 >= g.at && g.at + 6 >= b.at &&
-                hud_gauge_piece(b.x0, b.x1, b.y0, b.y1, w, h, g.x0, g.x1, g.y0, g.y1))
+            if (j != i && g.y1 - g.y0 > h * 0.15f && g.x1 - g.x0 < w * 0.1f &&
+                hud_gauge_piece(b.x0, b.x1, b.y0, b.y1, w, h, g.x0, g.x1, g.y0, g.y1) &&
+                ((b.at + 6 >= g.at && g.at + 6 >= b.at) ||
+                 // or, drawn further apart, its fill: across the tube's inside and down to its foot -- the breath
+                 // bar's fill under 15% of the height was an element of its own about the middle, and Compact drew
+                 // it up the tube (#219); a window's letters sliding across are narrower or end elsewhere
+                 (b.x1 - b.x0 >= (g.x1 - g.x0) * 0.4f && std::fabs(b.y1 - g.y1) <= 16)))
                 gauge[i] = 1;
         }
     hud_gauge_boxes_.clear();
+    hud_picture_boxes_.clear();
+    for (const HudBox& b : hud_boxes_)
+        if (hud_picture(b.x0, b.x1, b.y0, b.y1, w, h) && std::fabs((b.x0 + b.x1) / 2 - w / 2) < w * 0.12f &&
+            hud_picture_boxes_.size() < 16)
+            hud_picture_boxes_.push_back(b);
     for (size_t i = 0; i < n; i++)
         if (gauge[i]) hud_gauge_boxes_.push_back(hud_boxes_[i]);
     for (size_t i = 0; i < n; i++)
@@ -3980,7 +4409,14 @@ void VulkanBackend::HudGroup(float w, float h) {
             // a line of text's words (letters of one height, side by side) together across a space of up to
             // 0.6 letter heights (an item's name, "Great Spirit Elixir", was split in two at a 10-pixel gap)
             float g = std::fabs(a.y0 - b.y0) <= 2 && std::fabs(a.y1 - b.y1) <= 2 ? std::max(gx, (a.y1 - a.y0) * 0.6f) : gx;
-            if (gauge[i] == gauge[j] && a.x0 - g <= b.x1 && b.x0 - g <= a.x1 && a.y0 - gy <= b.y1 &&
+            // what starts in the upper 40% of the height (the health bar, the karma window -- its picture reaching
+            // far below its words) never with what starts lower (an area's name, #219: the HUD went about the middle
+            // with it); one line, so nothing between joins them either
+            // and a picture (HudPlace) only with pictures: never with the HUD, though a panel's pieces together;
+            // a gauge's pieces whole across that line (the breath gauge's cap and tube: Compact drew them apart)
+            bool apart = (!(gauge[i] && gauge[j]) && (a.y0 < h * 0.4f) != (b.y0 < h * 0.4f)) ||
+                         hud_picture(a.x0, a.x1, a.y0, a.y1, w, h) != hud_picture(b.x0, b.x1, b.y0, b.y1, w, h);
+            if (gauge[i] == gauge[j] && !apart && a.x0 - g <= b.x1 && b.x0 - g <= a.x1 && a.y0 - gy <= b.y1 &&
                 b.y0 - gy <= a.y1)
                 up[size_t(root(int(i)))] = root(int(j));
         }
@@ -4012,6 +4448,46 @@ void VulkanBackend::HudGroup(float w, float h) {
             pbox.x0 = std::min(pbox.x0, e.x0); pbox.x1 = std::max(pbox.x1, e.x1);
             pbox.y0 = std::min(pbox.y0, e.y0); pbox.y1 = std::max(pbox.y1, e.y1);
         }
+    }
+    // what sits in a side element's column, inside it or just under it (the Ultimate Technique's and Intercept's
+    // bonus under the karma window's Time, #219 -- apart from it at the upper band's line), keeps to its corner with
+    // it: about its own middle Compact drew it lower than the window, a gap between
+    // (lined up with it -- its near edge by the element's, so not an area name's first letters, which start
+    // further in -- not a picture, and only by an element at its corner of its own: no chain)
+    {
+        std::vector<char> pull(elems.size(), 0);
+        for (size_t i = 0; i < elems.size(); i++) {
+            const HudElem& e = elems[i];
+            if (e.gauge || e.ax == w / 2 || e.ay != h / 2 || hud_picture(e.x0, e.x1, e.y0, e.y1, w, h)) continue;
+            for (const HudElem& kq : elems) {
+                if (&kq == &e || kq.gauge || kq.ax != e.ax || kq.ay != 0.0f) continue;
+                if ((kq.x1 - kq.x0) * (kq.y1 - kq.y0) <= (e.x1 - e.x0) * (e.y1 - e.y0)) continue;
+                const bool lined = e.ax == 0.0f ? std::fabs(e.x0 - kq.x0) < w * 0.08f : std::fabs(e.x1 - kq.x1) < w * 0.08f;
+                if (lined && e.x0 >= kq.x0 - w * 0.03f && e.x1 <= kq.x1 + w * 0.05f && e.y0 >= kq.y0 &&
+                    e.y0 <= kq.y1 + 14) {
+                    pull[i] = 1;
+                    break;
+                }
+            }
+        }
+        // and what is beside or just under what moved, in the side's outer 35% (the bonus is in pieces: its words
+        // apart, "Techniques" past the window's column, its points under them)
+        for (int pass = 0; pass < 3; pass++)
+            for (size_t i = 0; i < elems.size(); i++) {
+                const HudElem& e = elems[i];
+                const float cx = (e.x0 + e.x1) / 2;
+                if (pull[i] || e.gauge || e.ax == w / 2 || e.ay != h / 2 || hud_picture(e.x0, e.x1, e.y0, e.y1, w, h) ||
+                    (e.ax == 0.0f ? cx > w * 0.35f : cx < w * 0.65f))
+                    continue;
+                for (size_t j = 0; j < elems.size() && !pull[i]; j++) {
+                    const HudElem& m = elems[j];
+                    if (pull[j] && m.ax == e.ax && e.x0 <= m.x1 + 10 && m.x0 <= e.x1 + 10 && e.y0 <= m.y1 + 14 &&
+                        m.y0 <= e.y1 + 14)
+                        pull[i] = 1;
+                }
+            }
+        for (size_t i = 0; i < elems.size(); i++)
+            if (pull[i]) elems[i].ay = 0.0f;
     }
     if (panel) {   // the panel's reach while it is seen (it slides and grows in)
         if (!hud_panel_ && hud_panel_count_ == 0) hud_panel_seen_ = pbox;
@@ -4094,7 +4570,7 @@ void VulkanBackend::Present(const Surface& front) {
         CapturePeek(none, pk_);
         CaptureQuick(qk_);
     }
-    presents_++;
+    if (!replay_) presents_++;   // (an interpolated picture is no frame of the game's: its timings count frames)
     id_count_ = 0;
     if (id_file_) std::fflush(id_file_);
     static const bool section_log = std::getenv("NGB_D3D_SECTION_LOG") != nullptr;
@@ -4146,7 +4622,8 @@ void VulkanBackend::Present(const Surface& front) {
             std::fclose(f);
             std::remove(burst.c_str());
             dump_from_ = presents_ + 1;
-            dump_count_ = 40;
+            static const uint32_t burst_n = std::getenv("NGB_D3D_BURST") ? uint32_t(std::atoi(std::getenv("NGB_D3D_BURST"))) : 40;
+            dump_count_ = burst_n;   // (NGB_D3D_BURST=n: that many)
         }
     }
     stat_frames_++;
@@ -4181,6 +4658,7 @@ void VulkanBackend::Present(const Surface& front) {
         if (t) {
             Image& d = display_[size_t(display_next_)];
             if (d.image && (d.w != t->img.w || d.h != t->img.h)) {
+                nv2a_present_flush_held();   // pictures the pacer holds shown before an image goes
                 Submit();
                 nv2a_vk_queue_lock();
                 d_.vkDeviceWaitIdle(dev_);
@@ -4218,7 +4696,7 @@ void VulkanBackend::Present(const Surface& front) {
                 GammaCopy(t->img, d, bars, bars_y);
                 Barrier(d, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
                 show = &d;
-                display_next_ = (display_next_ + 1) % 3;
+                display_next_ = (display_next_ + 1) % (hold_ ? 8 : 3);
             } else if (d.image) {
                 EndRendering();
                 Barrier(t->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -4231,22 +4709,42 @@ void VulkanBackend::Present(const Surface& front) {
                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
                 Barrier(d, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
                 show = &d;
-                display_next_ = (display_next_ + 1) % 3;
+                display_next_ = (display_next_ + 1) % (hold_ ? 8 : 3);
             }
         }
     }
+    if (!qk_.crosshair_px.empty()) {
+        crosshair_pending_.swap(qk_.crosshair_px);
+        crosshair_made_ = true;
+    }
+    if (show && qk_.crosshair) Crosshair(*show);   // (under the quick menu, which the game allows none of while aiming)
     if (show) QuickMenu(*show);
+    quick_blurred_ = false;
+    if (front.data != fronts_[0] && front.data != fronts_[1] && front.data != fronts_[2] && front.data != fronts_[3]) {
+        std::memmove(fronts_ + 1, fronts_, sizeof fronts_ - sizeof fronts_[0]);
+        fronts_[0] = front.data;
+    }
     if (!qk_.fps_px.empty()) {
         fps_pending_.swap(qk_.fps_px);
         fps_lettered_ = qk_.fps_lettered;
     }
     if (show) FpsCounter(*show);
+    if (!qk_.version_px.empty()) {
+        version_pending_.swap(qk_.version_px);
+        version_w_ = qk_.version_w;
+        version_h_ = qk_.version_h;
+    }
+    if (show) VersionLabel(*show);
     hud_menu_ = hud_cover_ >= 0.5f && threed_ < 30;
     for (int g = 0; g < 4; g++) {
         gauge_prev_[g][0] = g < gauges_now_ ? gauge_x_[g][0] : 1e30f;
         gauge_prev_[g][1] = g < gauges_now_ ? gauge_x_[g][1] : -1e30f;
     }
     gauges_now_ = 0;
+    top_left_prev_ = top_left_now_;
+    top_left_now_ = -1e30f;
+    mid_left_prev_ = mid_left_own_;
+    mid_left_now_ = mid_left_own_ = -1e30f;
     threed_prev_ = threed_;
     threed_ = 0;
     paused_now_ = false;
@@ -4275,7 +4773,10 @@ void VulkanBackend::Present(const Surface& front) {
     EndFrame();
     // after the frame is on the queue: the presenter's blit, later on the same queue, waits for it
     // (its barrier on the picture)
-    if (show) nv2a_present_set_external(show->image, show->w, show->h);
+    // interpolating: the frame's own picture held until the one made before it (the replay's) is shown
+    if (show && hold_ && !replay_) held_ = show;
+    else if (show && replay_ && replay_at_ > 0) nv2a_present_set_external_at(show->image, show->w, show->h, replay_at_);
+    else if (show) nv2a_present_set_external(show->image, show->w, show->h);
     frame_++;
 }
 

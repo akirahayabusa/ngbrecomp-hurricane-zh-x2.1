@@ -127,7 +127,7 @@ void VulkanBackend::QuickMenu(Image& dst) {
     if (!pipe || !quick_sampler_) return;
     // Apply the background effect before the crisp menu. Waiting for an
     // action and Quick Menu Pause Off both bypass this pass entirely.
-    if (qk_.frozen) QuickMenuBackground(dst);
+    if (qk_.frozen && !quick_blurred_) QuickMenuBackground(dst);   // (blurred under the HUD already: Draw, #217)
     Barrier(quick_layer_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     Barrier(dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     VkRenderingAttachmentInfo ca{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
@@ -164,25 +164,35 @@ void VulkanBackend::QuickMenu(Image& dst) {
 
 // The frame counter (F10) in the game's letters (src/fps_text.c), blended into the top left corner of the picture
 // shown: a premultiplied picture uploaded when it changes, drawn as the quick menu's layer is.
-void VulkanBackend::FpsCounter(Image& dst) {
-    if (!qk_.fps) return;
-    ngb_fps_target_h = int(dst.h);   // (lettered at this height from the next change)
-    if (!fps_layer_.image) {
-        if (!CreateImage(fps_layer_, kColorFormat, kFpsWidth, kFpsHeight, 1, 1, false, false,
-                         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)) return;
-        if (fps_pending_.empty()) fps_pending_.assign(size_t(kFpsWidth) * kFpsHeight, 0);   // clear until lettered
+// A picture of text (kFpsWidth x kFpsHeight, its text in the top left) blended over dst, its top left at x, y:
+// pending, when not empty, uploaded into layer first. draw false: the upload only. False when nothing was drawn.
+bool VulkanBackend::TextLayerDraw(Image& dst, Image& layer, std::vector<uint32_t>& pending, bool draw, float x,
+                                  float y) {
+    float sx, up;
+    TextScale(dst, &sx, &up);
+    return LayerDraw(dst, layer, pending, kFpsWidth, kFpsHeight, draw, x, y, kFpsWidth * sx * up, kFpsHeight * up);
+}
+
+// A premultiplied lw x lh picture blended over dst into the vw x vh rectangle at x, y (pending, when not empty,
+// uploaded into layer first; draw false: the upload only). False when nothing was drawn.
+bool VulkanBackend::LayerDraw(Image& dst, Image& layer, std::vector<uint32_t>& pending, uint32_t lw, uint32_t lh,
+                              bool draw, float x, float y, float vw, float vh) {
+    if (!layer.image) {
+        if (!CreateImage(layer, kColorFormat, lw, lh, 1, 1, false, false,
+                         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)) return false;
+        if (pending.empty()) pending.assign(size_t(lw) * lh, 0);   // clear until made
     }
-    if (!fps_pending_.empty()) {
-        VkDeviceSize at = Upload(fps_pending_.data(), fps_pending_.size() * sizeof(uint32_t), 16);
-        Barrier(fps_layer_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    if (!pending.empty()) {
+        VkDeviceSize at = Upload(pending.data(), pending.size() * sizeof(uint32_t), 16);
+        Barrier(layer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
         VkBufferImageCopy c{};
         c.bufferOffset = at;
         c.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        c.imageExtent = {uint32_t(kFpsWidth), uint32_t(kFpsHeight), 1};
-        d_.vkCmdCopyBufferToImage(cmd_, ring_, fps_layer_.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
-        fps_pending_.clear();
+        c.imageExtent = {lw, lh, 1};
+        d_.vkCmdCopyBufferToImage(cmd_, ring_, layer.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+        pending.clear();
     }
-    if (!fps_lettered_) return;   // the presenter's own letters meanwhile (the game's font not loaded yet)
+    if (!draw) return false;
     const uint64_t vs = 0xF113000000000001ull, ps = 0xF113000000000002ull;   // the quick menu's shaders
     PipeKey k{};
     k.vs = vs; k.ps = ps; k.topo = 2; k.wmask = 0xF; k.has_rt = 1; k.samples = 1;
@@ -204,8 +214,8 @@ void VulkanBackend::FpsCounter(Image& dst) {
         ci.addressModeU = ci.addressModeV = ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         d_.vkCreateSampler(dev_, &ci, nullptr, &quick_sampler_);
     }
-    if (!pipe || !quick_sampler_) return;
-    Barrier(fps_layer_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (!pipe || !quick_sampler_) return false;
+    Barrier(layer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     Barrier(dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     VkRenderingAttachmentInfo ca{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
     ca.imageView = dst.view; ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -214,17 +224,11 @@ void VulkanBackend::FpsCounter(Image& dst) {
     ri.renderArea = {{0, 0}, {dst.w, dst.h}}; ri.layerCount = 1;
     ri.colorAttachmentCount = 1; ri.pColorAttachments = &ca;
     d_.vkCmdBeginRendering(cmd_, &ri);
-    // lettered with square pixels at the picture's height; the picture is stretched to the display's aspect
-    int mode = ngb_pc_setting(7);
-    float aspect = mode == 0 ? 4.0f / 3 : mode == 2 ? 16.0f / 10 : mode == 3 ? 64.0f / 27 : mode == 4 ? 32.0f / 9
-                 : 16.0f / 9;
-    float sx = float(dst.w) / (float(dst.h) * aspect), up;
-    ngb_fps_cap(int(dst.h), &up);   // (lettered at most 40 pixels tall: drawn up larger)
-    VkViewport vp{dst.h * 0.012f * sx, dst.h * 0.004f, kFpsWidth * sx * up, kFpsHeight * up, 0, 1};
+    VkViewport vp{x, y, vw, vh, 0, 1};
     VkRect2D sc{{0, 0}, {dst.w, dst.h}};
     d_.vkCmdSetViewport(cmd_, 0, 1, &vp); d_.vkCmdSetScissor(cmd_, 0, 1, &sc);
     d_.vkCmdBindPipeline(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
-    VkDescriptorImageInfo im{VK_NULL_HANDLE, fps_layer_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorImageInfo im{VK_NULL_HANDLE, layer.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkDescriptorImageInfo sm{quick_sampler_, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED};
     VkWriteDescriptorSet w[2]{};
     for (auto& x : w) { x.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; x.descriptorCount = 1; }
@@ -234,5 +238,59 @@ void VulkanBackend::FpsCounter(Image& dst) {
     d_.vkCmdDraw(cmd_, 3, 1, 0, 0);
     d_.vkCmdEndRendering(cmd_);
     Barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    nv2a_fps_drawn_outside = 1;
+    return true;
+}
+
+// Text is lettered with square pixels at the picture's height, and the picture is stretched to the display's
+// aspect: *sx undoes that stretch across, *up how much larger than lettered it is drawn (at most 40 pixels tall).
+void VulkanBackend::TextScale(const Image& dst, float* sx, float* up) {
+    int mode = ngb_pc_setting(7);
+    float aspect = mode == 0 ? 4.0f / 3 : mode == 2 ? 16.0f / 10 : mode == 3 ? 64.0f / 27 : mode == 4 ? 32.0f / 9
+                 : 16.0f / 9;
+    *sx = float(dst.w) / (float(dst.h) * aspect);
+    ngb_fps_cap(int(dst.h), up);
+}
+
+void VulkanBackend::FpsCounter(Image& dst) {
+    if (!qk_.fps) return;
+    ngb_fps_target_h = int(dst.h);   // (lettered at this height from the next change)
+    float sx, up;
+    TextScale(dst, &sx, &up);
+    // (not lettered yet, the game's font not loaded: the presenter's own letters meanwhile)
+    if (TextLayerDraw(dst, fps_layer_, fps_pending_, fps_lettered_, dst.h * 0.012f * sx, dst.h * 0.004f))
+        nv2a_fps_drawn_outside = 1;
+}
+
+// The port's version in the bottom right corner while the main menu is up (#207), in from the edges as the
+// counter is from its corner.
+void VulkanBackend::VersionLabel(Image& dst) {
+    if (!qk_.version) {
+        if (!version_pending_.empty() && version_layer_.image)
+            TextLayerDraw(dst, version_layer_, version_pending_, false, 0, 0);
+        return;
+    }
+    ngb_fps_target_h = int(dst.h);
+    if (!version_w_) return;
+    float sx, up;
+    TextScale(dst, &sx, &up);
+    float x = dst.w - dst.h * 0.012f * sx - version_w_ * sx * up;
+    float y = dst.h - dst.h * 0.012f - version_h_ * up;
+    TextLayerDraw(dst, version_layer_, version_pending_, true, x, y);
+}
+
+// Bow Crosshair (#228): the game's glow at an arrow's head a little right of and below the middle of the picture (where
+// arrows land, #230), whatever the display's shape -- round (TextScale's sx undoes the picture's stretch to the
+// display's aspect) and about 2% of the height across, a small dot as NG2's.
+void VulkanBackend::Crosshair(Image& dst) {
+    if (!crosshair_made_) return;
+    float sx, up;   // (up: the text's, unused here)
+    TextScale(dst, &sx, &up);
+    float size = dst.h * 0.0275f;   // (the glow 80% of the picture: about 2.2% of the height)
+    // Where arrows land (#230): a user's shot into a wall stuck 17 px right and 17 px low of the middle at 2560x1440
+    // 16:9 = 1.2% of the height each way (kept in heights, so the same angle at other aspects). The Strongbow's fly
+    // straight to the middle: the dot there.
+    const bool straight = qk_.crosshair == 2;
+    float right = straight ? 0.0f : dst.h * 0.012f * sx, down = straight ? 0.0f : dst.h * 0.012f;
+    LayerDraw(dst, crosshair_layer_, crosshair_pending_, kCrosshairSize, kCrosshairSize, true,
+              dst.w * 0.5f + right - size * sx * 0.5f, dst.h * 0.5f + down - size * 0.5f, size * sx, size);
 }

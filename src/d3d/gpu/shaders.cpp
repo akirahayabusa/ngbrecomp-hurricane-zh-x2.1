@@ -408,6 +408,8 @@ std::string TexFetch(const PixelKey& k, int i) {
     std::string uv2d;   // the last 2D sample's coordinates, for a bump map's decoded fetch
     auto put = [&](const std::string& v) {
         std::string r = F("float4 t%d = %s;\n", i, v.c_str());
+        if (((k.alphakill >> (4 + i)) & 1) && !uv2d.empty())   // read past the picture's edge: the pixel not drawn
+            r += F("{ float2 e%d = %s; if (any(e%d < 0) || any(e%d > 1)) discard; }\n", i, uv2d.c_str(), i, i);
         if ((t.flags & kTexSigned) && !uv2d.empty())   // a bump map: its du dv, each texel decoded first (bumpduv)
             r += F("float2 duv%d = bumpduv%d(%s);\n", i, i, uv2d.c_str());
         return r;
@@ -1002,6 +1004,17 @@ std::string PixelHlsl(const PixelKey& k) {
             std::string tcxy = k.quad ? F("(qsnap.x > 0 ? clamp(tc%d.xy, uvc[%d].xy, uvc[%d].zw) : tc%d.xy)", i, i, i, i)
                                       : F("tc%d.xy", i);
             std::string uv = (k.proj >> i) & 1 ? F("(tc%d.xy / tc%d.w)%s", i, i, norm.c_str()) : F("%s%s", tcxy.c_str(), norm.c_str());
+            if ((k.alphakill >> (4 + i)) & 1) {
+                // the heat haze (#55): its read is the pixel's own place in the screen's copy (b) moved by the
+                // haze (d). Near the copy's edges the move toward that edge fades out (to none at the edge, over 3%
+                // of the copy): the haze is drawn there, less moved, and never reads past the picture -- where it
+                // read the edge column clamped, a streaky band; mirrored, the picture's mirror
+                body += F("float2 hz%d;\n{\n    float2 u = %s, b = i.pos.xy / (surf.xy * surf.w), d = u - b;\n"
+                          "    d.x *= d.x > 0 ? saturate((1 - b.x) / 0.03) : saturate(b.x / 0.03);\n"
+                          "    d.y *= d.y > 0 ? saturate((1 - b.y) / 0.03) : saturate(b.y / 0.03);\n"
+                          "    hz%d = b + d;\n}\n", i, uv.c_str(), i);
+                uv = F("hz%d", i);
+            }
             std::string cube;
             if (t.shadow)
                 body += F("float4 t%d = shadow%d((tc%d.xy / tc%d.w)%s, tc%d.z / tc%d.w, %d, i.pos.xy, texsize[%d].xy);\n", i, i, i, i,
@@ -1117,11 +1130,28 @@ std::string QuadHlsl(std::string s) {
     // texture coordinates move with them along their gradients. Shifted half a console pixel as everything is,
     // an edge at a whole coordinate left a strip of the target uncovered above 1x (the top and left of a full
     // screen fade, #83). At 1x the same pixels and coordinates as before.
-    const std::string shift = "    p.xy += 0.5;\n";
+    // Before the narrowing (ext): pieces meeting at an edge keep meeting -- snapped after it, two tiles of an item's
+    // screen at 21:9 rounded apart and a moving black line showed between them (#219).
+    const std::string shift = "    if (ext.x > 0) p.x = ext.y";
     size_t at = s.find(shift);
     if (at != std::string::npos)
         s.insert(at, "    if (qsnap.x > 0) {\n"
                      "        float2 sp = ceil(p.xy - 0.0001) - 0.5;\n"
+                     "        float2 dq = sp - p.xy;\n"
+                     "        oT0.xy += float2(dot(uvg[0].xy, dq), dot(uvg[0].zw, dq));\n"
+                     "        oT1.xy += float2(dot(uvg[1].xy, dq), dot(uvg[1].zw, dq));\n"
+                     "        oT2.xy += float2(dot(uvg[2].xy, dq), dot(uvg[2].zw, dq));\n"
+                     "        oT3.xy += float2(dot(uvg[3].xy, dq), dot(uvg[3].zw, dq));\n"
+                     "        p.xy = sp;\n"
+                     "    }\n");
+    // and again after it, on the target's own pixels (surf.w of them to the console's): narrowed off them, words
+    // drawn sliding or growing (the Ultimate Technique's bonus) shimmered. Pieces meeting before still meet: the
+    // same edge narrows to the same place. (On the console's coarser pixels a line a pixel wide could vanish.)
+    const std::string shift2 = "    p.xy += 0.5;\n";
+    at = s.find(shift2);
+    if (at != std::string::npos)
+        s.insert(at, "    if (qsnap.x > 0 && (ext.x > 0 || ext.z > 0)) {\n"
+                     "        float2 sp = ceil((p.xy + 0.5) * surf.w - 0.0001) / surf.w - 0.5;\n"
                      "        float2 dq = (sp - p.xy) / float2(ext.x > 0 ? ext.x : 1, ext.z > 0 ? ext.z : 1);\n"
                      "        oT0.xy += float2(dot(uvg[0].xy, dq), dot(uvg[0].zw, dq));\n"
                      "        oT1.xy += float2(dot(uvg[1].xy, dq), dot(uvg[1].zw, dq));\n"
