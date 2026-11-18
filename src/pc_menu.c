@@ -134,6 +134,7 @@ static const struct { const uint8_t *kinds; int n; } s_ours[N_OURS] = {
 #define T_INTERP   0x20208            /* Frame Interpolation (src/d3d/gpu/threaded.cpp, #226) */
 #define D_INTERP   0x20209
 #define T_INTERP0  0x2020A            /* + 0..3: Off, Full Rate, Half Rate, 2x */
+#define T_GLOW0    0x2020E            /* + 0..3: Bloom's Original, Reduced, Corrected, Off */
 #define T_AUDIOOUT 0x201CF            /* Audio Output: Auto, Stereo, 5.1 (src/audio) */
 #define D_AUDIOOUT 0x201D0
 #define T_AUTO     0x201D1
@@ -198,7 +199,7 @@ static const struct { const uint8_t *kinds; int n; } s_ours[N_OURS] = {
 #define D_EXTRACOST 0x201AE
 #define T_EXTRA0   0x201B0            /* + 0..3: Game's Choice, Extra 1-3 */
 #define D_CONTROLS 0x201B4            /* the category */
-#define T_GLOW     0x201B5            /* Smoother Glow (src/d3d/vk/glow_options.h) */
+#define T_GLOW     0x201B5            /* Bloom (src/d3d/vk/glow_options.h) */
 #define D_GLOW     0x201B6
 #define T_MISSIONS 0x201D4            /* the unlocks (src/cheats.c): the main menu's extras */
 #define T_ARCADE   0x201D5
@@ -252,6 +253,7 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_INTERP, "Frame Interpolation" },
     { D_INTERP, "Experimental. Pictures between the game's frames, on a 120 Hz or faster display." },
     { T_INTERP0 + 0, "Off" }, { T_INTERP0 + 1, "Full Rate" }, { T_INTERP0 + 2, "Half Rate" }, { T_INTERP0 + 3, "2x" },
+    { T_GLOW0 + 0, "Original" }, { T_GLOW0 + 1, "Reduced" }, { T_GLOW0 + 2, "Corrected" }, { T_GLOW0 + 3, "Off" },
     { D_HUD, "The health and Ninpo bar, weapons and the rest drawn over play. Off: a clear screen." },
     { T_AUDIOOUT, "Audio Output" },
     { D_AUDIOOUT, "Speakers. Auto: 5.1 when the output device has 5.1 or 7.1 channels, else stereo. Needs a restart of the game." },
@@ -284,8 +286,8 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_TEXTURE, "Anisotropic Filtering" },
     { T_MSAA,    "Anti-Aliasing (MSAA)" },
     { D_MSAA,    "Smooths the edges of the 3D; 2x to 8x samples a pixel." },
-    { T_GLOW,    "Smoother Glow" },
-    { D_GLOW,    "A softer, fainter glow on bright lights. Off: the console's." },
+    { T_GLOW,    "Bloom" },
+    { D_GLOW,    "Original: the console's. Corrected: the same bloom, steady and even at any resolution. Off: none." },
     { T_LOADDETAIL, "Lower Detail Under Load" },
     { D_LOADDETAIL, "Eases off detail when busy, as on the Xbox; Ryu's shadow may flicker." },
     { T_RTHREAD, "Multithreaded Renderer" },
@@ -640,6 +642,10 @@ void ngb_aspect_menu_running(void)
 /* Each frame's end (src/cheats.c, at Swap): the next frame's mode -- a menu marks itself again; a
  * frame of next to no 3D (the renderer's count, src/d3d/vk/backend.cpp) is a 2D screen. */
 extern int ngb_frame_draws, ngb_frame_3d_draws, ngb_frame_done_2d, ngb_render_threaded;
+/* src/hud.c: the game's HUD routine found play this frame (by its own test, before it draws the bars). Such a
+ * frame is play however few 3D draws it makes: first person facing an empty view draws next to none, and would be
+ * taken for a 2D screen, the HUD laid out as one's. */
+extern volatile int ngb_hud_in_play;
 void ngb_aspect_frame_end(void)
 {
 
@@ -650,7 +656,8 @@ void ngb_aspect_frame_end(void)
     if (__atomic_load_n(&ngb_render_threaded, __ATOMIC_RELAXED))
         s_screen_2d = __atomic_load_n(&ngb_frame_done_2d, __ATOMIC_RELAXED);
     else
-        s_screen_2d = ngb_frame_draws > 0 && ngb_frame_3d_draws < 30;
+        s_screen_2d = ngb_frame_draws > 0 && ngb_frame_3d_draws < 30 && !ngb_hud_in_play;
+    ngb_hud_in_play = 0;   /* (the next frame's HUD routine says again) */
 }
 
 /* For the renderer and the mouse: the game is in its widescreen mode on a wide screen, its 2D drawn
@@ -674,14 +681,15 @@ int ngb_2d_screen(void)
  * that one frame. */
 int ngb_2d_screen_frame(int threed)
 {
-    return s_screen_wide && (s_menu_now || ((s_menu_last || s_screen_2d) && threed < 30));
+    return s_screen_wide && (s_menu_now || ((s_menu_last || s_screen_2d) && !ngb_hud_in_play && threed < 30));
 }
 
 /* Its parts as of a call, for a renderer that draws later (gpu::Peek): 1 a menu now, 2 the last frame's menu or a
- * 2D screen -- ngb_2d_screen_frame is (1) or (2 and fewer than 30 3D draws so far). */
+ * 2D screen, 4 play found by the HUD routine -- ngb_2d_screen_frame is (1) or (2, not 4, and fewer than 30 3D draws
+ * so far). */
 int ngb_2d_screen_flags(void)
 {
-    return s_screen_wide ? (s_menu_now ? 1 : 0) | (s_menu_last || s_screen_2d ? 2 : 0) : 0;
+    return s_screen_wide ? (s_menu_now ? 1 : 0) | (s_menu_last || s_screen_2d ? 2 : 0) | (ngb_hud_in_play ? 4 : 0) : 0;
 }
 /* Before the game runs: the screen's shape (the flags are the game's to set up, then kept by the tick). */
 void ngb_game_aspect_init(int widescreen)
@@ -714,6 +722,8 @@ void ngb_aspect_tick(void)
             fprintf(stderr, "[ASPECT] tick: constants %.4f %.4f 977EF8 %.4f flags %X\n", MEMF(0x414AF4), MEMF(0x414AF8),
                     MEMF(0x977EF8), MEM32(0x9776A8));
     }
+    void ngb_aspect_follow_window(void);   /* src/ingame_menu.c */
+    ngb_aspect_follow_window();
     if (s_aspect_a > 0 && patch_constant(s_aspect_a))
         s_aspect_a = 0;
     if (s_flags_wide >= 0) {
@@ -876,7 +886,7 @@ static uint32_t pc_value_id(int row, uint32_t movie_id)
     case ROW_ALLDIFF: return ngb_pc_setting(14) ? T_YES : T_NO;
     case ROW_SCARABS: return ngb_pc_setting(15) ? T_ON : T_OFF;
     case ROW_ALLCOST: return ngb_pc_setting(16) ? T_YES : T_NO;
-    case ROW_GLOW:    return ngb_pc_setting(18) ? T_ON : T_OFF;
+    case ROW_GLOW:    return T_GLOW0 + (uint32_t)ngb_pc_setting(18);
     case ROW_LOADDETAIL: return ngb_pc_setting(29) ? T_ON : T_OFF;
     case ROW_RTHREAD: return ngb_pc_setting(30) ? T_ON : T_OFF;
     case ROW_INFITEMS: return ngb_pc_setting(21) ? T_ON : T_OFF;
@@ -950,7 +960,7 @@ static int pc_value_change(int row, int delta)
     case ROW_ALLDIFF: ngb_pc_set_setting(14, !ngb_pc_setting(14)); break;
     case ROW_SCARABS: ngb_pc_set_setting(15, !ngb_pc_setting(15)); break;
     case ROW_ALLCOST: ngb_pc_set_setting(16, !ngb_pc_setting(16)); break;
-    case ROW_GLOW:    ngb_pc_set_setting(18, !ngb_pc_setting(18)); break;
+    case ROW_GLOW:    ngb_pc_set_setting(18, ngb_glow_step(ngb_pc_setting(18), step)); break;
     case ROW_LOADDETAIL: ngb_pc_set_setting(29, !ngb_pc_setting(29)); break;
     case ROW_RTHREAD: ngb_pc_set_setting(30, !ngb_pc_setting(30)); break;
     case ROW_INFITEMS: ngb_pc_set_setting(21, !ngb_pc_setting(21)); break;

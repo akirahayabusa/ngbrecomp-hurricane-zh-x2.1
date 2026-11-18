@@ -65,6 +65,14 @@ int ngb_pc_setting(int which);
 }
 
 extern "C" volatile int ngb_nv2a_logdraws;   // xemu pgraph/vk/draw.c
+// Texture packs (xboxrecomp pgraph/vk/texpack.c: NV2A_TEX_REPLACE's folder of <id>.png, NV2A_TEX_DUMP's)
+extern "C" {
+bool pgraph_vk_texpack_active(void);
+bool pgraph_vk_texpack_has(uint64_t id);
+uint8_t* pgraph_vk_texpack_load(uint64_t id, int* w, int* h);
+void pgraph_vk_texpack_free(uint8_t* px);
+void pgraph_vk_texpack_dump(uint64_t id, const void* data, int w, int h, VkFormat fmt, VkComponentMapping map);
+}
 
 namespace gpu {
 namespace {
@@ -274,6 +282,7 @@ struct Target {
     uint32_t gw = 0, gh = 0;   // guest size
     uint32_t samples = 1;
     bool drawn = false;
+    bool split_due = false;    // drawn into since the last command buffer split (SplitCommands)
     bool ms_stale = false;     // img holds the picture, ms not yet: filled from img before the next pass
     Image fb;                  // a copy of img for a draw that reads the target it draws into (BindTexture)
     uint32_t addr = 0;         // its guest memory (physical)
@@ -284,6 +293,7 @@ struct Target {
 struct Tex {
     Image img;
     int gen = -1;              // made with generated mipmaps (1), or as given (0)
+    bool pack = false;         // drawn from a texture pack's picture (its own size, mipmaps made)
     uint64_t sig = 0;          // the guest bytes (and palette) it was made from
     uint32_t used = 0;         // frame last used
     TexInfo info;
@@ -423,7 +433,12 @@ private:
     uint32_t towers_lo_ = 0, towers_hi_ = 0;   // the towers' chunk's data, up to the next loaded chunk's
     uint32_t towers_frame_ = ~0u, peek_frames_ = 0;
     // ngb_2d_screen_frame as of the call: a 2D screen, knowing the 3D drawn so far this frame
-    bool ScreenFrame(uint32_t threed) const { return (pk_.screen & 1) || ((pk_.screen & 2) && threed < 30); }
+    // (4: the game's HUD routine found play this frame -- play, however little 3D: first person facing an empty
+    // view draws next to none, and its HUD was laid out as a 2D screen's)
+    bool ScreenFrame(uint32_t threed) const {
+        return (pk_.screen & 1) || ((pk_.screen & 2) && !(pk_.screen & 4) && threed < 30);
+    }
+    bool play_seen_ = false;   // a draw of this frame came after the HUD routine found play
     // device: the NV2A renderer's, shared, when NGB_RENDERER=d3d (its presenter then shows our
     // frames in the game window); else one of our own, drawing unseen (mirror mode)
     bool CreateInstance();
@@ -437,7 +452,10 @@ private:
     Image continuous_glow_[3];
     uint32_t continuous_hits_[3]{};
     void InvalidateContinuousGlow(uint32_t data);
-    int ContinuousGlowStage(const State& s,const Assembled& a,uint32_t count);
+    int ContinuousGlowStage(const State& s,const Assembled& a,uint32_t count,bool chained=true);
+    ContinuousRecord glow_final_;   // Corrected and Off: the 128x128 the game's last blur drew this frame
+    int glow_stage_=-1;             // Corrected: this draw's stage of the game's chain (ClassifyGlowTarget)
+    Image glow_avg_;                // Corrected: the bright pass averaged to the console's 256x256
     bool ContinuousGlowPass(Image& input,Image& output,uint32_t w,uint32_t h,int stage,const float* threshold);
     void ApplyContinuousGlow(const State& s,const Assembled& a,uint32_t count,Target& rt,const DrawConstants& c);
     Image glow_soft_[2];
@@ -495,6 +513,7 @@ private:
     float point_max_ = 1.0f;
     float view_yaw_ = 0, view_pitch_ = 0;   // NGB_D3D_VIEWLOG
     bool view_seen_ = false;
+    uint32_t image_max_ = 4096;   // maxImageDimension2D: a texture pack's picture past it is not used
     float lod_bias_max_ = 0.0f;   // maxSamplerLodBias    // the largest point (largePoints): the particles are point sprites (#51)
     float line_max_ = 1.0f;
     VkSampleCountFlags ms_counts_ = VK_SAMPLE_COUNT_1_BIT;   // the device's for colour and depth together
@@ -591,6 +610,12 @@ private:
     VkCommandBuffer cmd_ = VK_NULL_HANDLE;
     VkFence fence_ = VK_NULL_HANDLE;
     VkCommandBuffer cmds_[2] = {};
+    // a frame's commands in more than one command buffer (SplitCommands), submitted together with the last
+    std::vector<VkCommandBuffer> extra_[2];
+    size_t extra_at_[2] = {};
+    std::vector<VkCommandBuffer> pending_;
+    void SplitCommands();
+    void SubmitWith(VkFence fence);
     VkFence fences_[2] = {};
     // Set 0 per draw: pushed (VK_KHR_push_descriptor), or on a driver without it (the Mali drivers of many MediaTek
     // phones, #158 #159) written to a set from the frame slot's pools and bound -- the pools emptied with the slot's
@@ -892,6 +917,7 @@ bool VulkanBackend::FinishDevice() {
     line_max_ = pr.limits.lineWidthRange[1];
     point_max_ = feat.largePoints == VK_TRUE ? pr.limits.pointSizeRange[1] : 1.0f;
     lod_bias_max_ = pr.limits.maxSamplerLodBias;
+    image_max_ = pr.limits.maxImageDimension2D;
     ms_counts_ = pr.limits.framebufferColorSampleCounts & pr.limits.framebufferDepthSampleCounts &
                  pr.limits.framebufferStencilSampleCounts;
     ReadQuality();
@@ -1076,6 +1102,7 @@ VulkanBackend::~VulkanBackend() {
     if (dev_) {
         for (auto& image:continuous_glow_) DestroyImage(image);
         for (auto& image:glow_soft_) DestroyImage(image);
+        DestroyImage(glow_avg_);
         DestroyImage(quick_background_);
         DestroyImage(fps_layer_);
         DestroyImage(version_layer_);
@@ -1159,11 +1186,8 @@ void VulkanBackend::Submit() {
     TsEnd();
     d_.vkEndCommandBuffer(cmd_);
     auto sync_t0 = stats_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    si.commandBufferCount = 1;
-    si.pCommandBuffers = &cmd_;
     d_.vkResetFences(dev_, 1, &fence_);
-    QueueSubmit(si, fence_);
+    SubmitWith(fence_);
     d_.vkWaitForFences(dev_, 1, &fence_, VK_TRUE, UINT64_MAX);
     if (submitted_[slot_ ^ 1]) {
         d_.vkWaitForFences(dev_, 1, &fences_[slot_ ^ 1], VK_TRUE, UINT64_MAX);
@@ -1178,12 +1202,55 @@ void VulkanBackend::Submit() {
             std::chrono::steady_clock::now() - sync_t0).count());
     }
     d_.vkResetCommandBuffer(cmd_, 0);
+    if (cmd_ != cmds_[slot_]) {   // split this frame: all of the slot's buffers are done, its own one goes on
+        cmd_ = cmds_[slot_];
+        d_.vkResetCommandBuffer(cmd_, 0);
+    }
+    for (size_t i = 0; i < extra_at_[slot_]; i++) d_.vkResetCommandBuffer(extra_[slot_][i], 0);
+    extra_at_[slot_] = 0;
     ResetSets(slot_);
     if (!submitted_[slot_ ^ 1]) ResetSets(slot_ ^ 1);
     recording_ = false;
     ring_pos_ = 0;
     ring_epoch_++;
     Begin();
+}
+
+// The commands recorded so far ended and set aside, the rest recorded into another of the slot's buffers; all
+// go to the GPU together, in order, at the next submit. Turnip (Adreno) read a picture drawn earlier in the same
+// command buffer as it was before (the water's screen copy black, #234 #235) whatever the barriers; a command
+// buffer boundary between the two set it right.
+void VulkanBackend::SplitCommands() {
+    if (!recording_) return;
+    EndRendering();
+    VkCommandBuffer next;
+    if (extra_at_[slot_] < extra_[slot_].size()) {
+        next = extra_[slot_][extra_at_[slot_]];
+    } else {
+        VkCommandBufferAllocateInfo cai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        cai.commandPool = pool_;
+        cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        cai.commandBufferCount = 1;
+        if (d_.vkAllocateCommandBuffers(dev_, &cai, &next) != VK_SUCCESS) return;
+        extra_[slot_].push_back(next);
+    }
+    extra_at_[slot_]++;
+    d_.vkEndCommandBuffer(cmd_);
+    pending_.push_back(cmd_);
+    cmd_ = next;
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    d_.vkBeginCommandBuffer(cmd_, &bi);
+}
+
+// the set-aside buffers and the one recording, in order, in one submission
+void VulkanBackend::SubmitWith(VkFence fence) {
+    pending_.push_back(cmd_);
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.commandBufferCount = uint32_t(pending_.size());
+    si.pCommandBuffers = pending_.data();
+    QueueSubmit(si, fence);
+    pending_.clear();
 }
 
 // The frame's commands to the GPU without waiting: the next frame records in the other slot, once
@@ -1193,11 +1260,8 @@ void VulkanBackend::EndFrame() {
     EndRendering();
     TsEnd();
     d_.vkEndCommandBuffer(cmd_);
-    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    si.commandBufferCount = 1;
-    si.pCommandBuffers = &cmd_;
     d_.vkResetFences(dev_, 1, &fence_);
-    QueueSubmit(si, fence_);
+    SubmitWith(fence_);
     submitted_[slot_] = true;
     recording_ = false;
     slot_ ^= 1;
@@ -1209,6 +1273,8 @@ void VulkanBackend::EndFrame() {
         VisResults(slot_);
     }
     d_.vkResetCommandBuffer(cmd_, 0);
+    for (size_t i = 0; i < extra_at_[slot_]; i++) d_.vkResetCommandBuffer(extra_[slot_][i], 0);
+    extra_at_[slot_] = 0;
     ResetSets(slot_);
     ring_pos_ = 0;
     ring_epoch_++;
@@ -1729,6 +1795,12 @@ void VulkanBackend::VisResults(int slot) {
 // colour target. A shadow, simulation or unrelated 128x128 target keeps
 // its original allocation. The classification persists through its clear.
 void VulkanBackend::ClassifyGlowTarget(const State& s,const Assembled& a,uint32_t count) {
+    glow_stage_=-1;
+    if (GlowCorrected() || GlowOff()) {   // the game's own passes: each known by itself, none of them replaced
+        glow_stage_=ContinuousGlowStage(s,a,count,false);
+        if (glow_stage_==2) glow_final_={s.rt.data&0x7FFFFFFFu,frame_};
+        return;
+    }
     if (!ContinuousGlowEnabled() || ContinuousGlowStage(s,a,count)!=2) return;
     glow_targets_.insert(s.rt.data);
 }
@@ -2028,6 +2100,7 @@ void VulkanBackend::BeginRendering(Target* rt, Target* ds) {
             ca.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         }
         rt->drawn = true;
+        rt->split_due = true;
         StampTarget(*rt);
     }
     if (ds) {
@@ -2099,7 +2172,10 @@ void VulkanBackend::Clear(const State& s, uint32_t count, const uint8_t* rects, 
         Color(color, at[n].clearValue.color.float32);
         n++;
     }
-    if (ds && ds == bds) {
+    // only when the pass has it: a depth target of another size than the colour one is left out of the pass
+    // (BeginRendering), and clearing a depth aspect the pass has no attachment for is invalid (the water's
+    // 256x256 screen copy is cleared with the game's 720x480 depth buffer set, #234 #235)
+    if (ds && ds == bds && ds == bound_ds_) {
         VkImageAspectFlags a = ((flags & kClearZ) ? VK_IMAGE_ASPECT_DEPTH_BIT : 0) |
                                ((flags & kClearStencil) ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
         at[n] = {a, 0, {}};
@@ -2272,7 +2348,7 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
     bool mip_candidate = aniso_level_ > 0 && d.levels == 1 && !d.cube && (TextureFormat(fi.host) == kColorFormat || bc) &&
                          d.width >= 8 && d.height >= 8 && pow2(d.width) && pow2(d.height) &&
                          d.format != 0x28 && d.format != 0x17;
-    if (tx.img.image && tx.sig == sig && tx.img.w == d.width && tx.img.h == d.height &&
+    if (tx.img.image && tx.sig == sig && (tx.pack || (tx.img.w == d.width && tx.img.h == d.height)) &&
         (tx.gen == 2 || tx.gen == (mip_candidate ? 1 : 0))) {
         tx.used = frame_;
         if (bump_src) {
@@ -2289,6 +2365,56 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
     uint32_t levels = d.levels;
     std::vector<uint8_t> top;
     tx.gen = 0;
+    tx.pack = false;
+    // Texture packs (#249): a texture's id is its signature (its bytes, palette, format and size), the picture
+    // <id>.png in NV2A_TEX_REPLACE's folder (<data>/textures, src/main.c) is drawn in its place at its own size
+    // (the same aspect ratio: coordinates are fractions of it), and NV2A_TEX_DUMP=<dir> writes each one as the
+    // game has it, under that name. Plain 2D colour textures only: not cube maps, bump maps, nor linear ones,
+    // whose coordinates count texels.
+    static const bool pack_on = pgraph_vk_texpack_active();
+    static const bool pack_dump = [] { const char* e = std::getenv("NV2A_TEX_DUMP"); return e && *e; }();
+    bool pack_candidate = pack_on && !d.cube && !d.linear && !bump_src && (fi.host == Host::BGRA8 || bc);
+    uint32_t tw = d.width, th = d.height;   // the top level's size
+    static std::set<uint64_t> pack_failed;   // pictures the GPU could not hold: the game's own, not read again
+    if (pack_candidate && !pack_failed.count(sig) && pgraph_vk_texpack_has(sig)) {
+        int pw = 0, ph = 0;
+        uint8_t* px = pgraph_vk_texpack_load(sig, &pw, &ph);
+        // at most 8192 a side (and the GPU's own limit): 256 MB of picture, decoded on the render thread
+        const uint32_t pack_max = std::min(image_max_, 8192u);
+        if (px && pw > 0 && ph > 0 && uint32_t(pw) <= pack_max && uint32_t(ph) <= pack_max) {
+            top.resize(size_t(pw) * size_t(ph) * 4);
+            bool opaque = true;
+            for (size_t i = 0; i < top.size(); i += 4) {   // RGBA to BGRA
+                top[i] = px[i + 2];
+                top[i + 1] = px[i + 1];
+                top[i + 2] = px[i];
+                top[i + 3] = px[i + 3];
+                opaque = opaque && px[i + 3] == 0xFF;
+            }
+            tw = uint32_t(pw);
+            th = uint32_t(ph);
+            tx.pack = true;
+            tx.gen = 2;
+            fmt = kColorFormat;
+            // mipmaps as for the game's own textures (above): opaque ones, and those the game gave its own (its
+            // cut-outs thin with distance on the console too); averaging the alpha of a cut-out the game drew
+            // from one level would thin it away, so that one stays one level, as the game's is
+            levels = 1;
+            if (opaque || d.levels > 1)
+                while ((std::max(tw, th) >> levels) > 0) levels++;
+            static int told;
+            if (told < 16 && ++told)
+                std::fprintf(stderr, "[D3D] texture pack: %016llx (%ux%u fmt %X) drawn from %dx%d\n",
+                             (unsigned long long)sig, d.width, d.height, d.format, pw, ph);
+        }
+        if (px && !tx.pack) {
+            static int told;
+            if (told < 16 && ++told)
+                std::fprintf(stderr, "[D3D] texture pack: %016llx is %dx%d, past %u: the game's own is drawn\n",
+                             (unsigned long long)sig, pw, ph, std::min(image_max_, 8192u));
+        }
+        if (px) pgraph_vk_texpack_free(px);
+    }
     static const bool miplog = std::getenv("NGB_D3D_MIPLOG") != nullptr;
     if (miplog) {   // debugging: which textures have one level, and their format
         static int n;
@@ -2298,7 +2424,7 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
                          int(fi.host), mip_candidate);
         }
     }
-    if (mip_candidate) {
+    if (mip_candidate && !tx.pack) {
         uint32_t pitch = 0;
         DecodeLevel(d, 0, 0, guest, palette, top, pitch);
         if (bc && !top.empty()) {   // DXT: decoded here, the chain made from the texels
@@ -2318,16 +2444,23 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
         }
     }
     auto make = [&] {
-        return CreateImage(tx.img, fmt, d.width, d.height, faces, levels, false, d.cube,
+        return CreateImage(tx.img, fmt, tw, th, faces, levels, false, d.cube,
                            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                               (tx.gen == 1 ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0), 1, false);
+                               (tx.gen == 1 || tx.pack ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0), 1, false);
     };
     if (!make()) {   // out of memory: what this frame and the last didn't use goes, and once more (#81)
         size_t gone = EvictTextures(2);
         std::fprintf(stderr, "[D3D] texture %08X %ux%u: no memory, %zu idle textures freed\n", d.data, d.width, d.height,
                      gone);
-        if (!gone || !make())
+        if (!gone || !make()) {
+            if (tx.pack) {   // a pack's picture too big for what is free: the game's own texture from now on
+                pack_failed.insert(sig);
+                std::fprintf(stderr, "[D3D] texture pack: %016llx (%ux%u) left out, no memory for it\n",
+                             (unsigned long long)sig, tw, th);
+            }
+            tx.pack = false;
             return VK_NULL_HANDLE;
+        }
     }
     tx.sig = sig;
     tx.used = frame_;
@@ -2338,10 +2471,40 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
         texdumped++;
         DumpTexture(d, fi, guest, palette, texdump, nullptr);
     }
+    if (pack_dump && pack_candidate && !tx.pack) {   // written once an id, by texpack.c's own thread
+        std::vector<uint8_t> px;
+        if (tx.gen == 1) px = top;
+        else {
+            uint32_t pitch = 0;
+            DecodeLevel(d, 0, 0, guest, palette, px, pitch);
+            if (bc && !px.empty()) {
+                std::vector<uint8_t> raw;
+                raw.swap(px);
+                DecodeBC(fi.host, raw.data(), d.width, d.height, px);
+            }
+        }
+        if (px.size() == size_t(d.width) * d.height * 4)
+            pgraph_vk_texpack_dump(sig, px.data(), int(d.width), int(d.height), VK_FORMAT_B8G8R8A8_UNORM,
+                                   VkComponentMapping{VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                                                      VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY});
+    }
     EndRendering();
     Barrier(tx.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     std::vector<uint8_t> out;
-    for (uint32_t f = 0; f < faces; f++)
+    if (tx.pack) {   // the pack's picture as the top level, in bands of rows the upload ring holds; the chain is made below
+        const uint32_t rows = std::max(1u, uint32_t((kRingSize / 4) / (VkDeviceSize(tw) * 4)));
+        for (uint32_t y = 0; y < th; y += rows) {
+            uint32_t n = std::min(rows, th - y);
+            VkDeviceSize at = Upload(top.data() + size_t(y) * tw * 4, VkDeviceSize(n) * tw * 4, 16);
+            VkBufferImageCopy c{};
+            c.bufferOffset = at;
+            c.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            c.imageOffset = {0, int32_t(y), 0};
+            c.imageExtent = {tw, n, 1};
+            d_.vkCmdCopyBufferToImage(cmd_, ring_, tx.img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+        }
+    }
+    for (uint32_t f = 0; f < (tx.pack ? 0 : faces); f++)
         for (uint32_t l = 0; l < d.levels; l++) {
             uint32_t pitch = 0;
             if (tx.gen == 1) out = top;   // the top level as decoded above (BGRA)
@@ -2375,7 +2538,7 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
             c.imageExtent = {std::max(d.width >> l, 1u), std::max(d.height >> l, 1u), 1};
             d_.vkCmdCopyBufferToImage(cmd_, ring_, tx.img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
         }
-    if (tx.gen == 1) {   // the rest of the chain, each level a 2:1 linear blit (a box filter) of the one above
+    if ((tx.gen == 1 || tx.pack) && levels > 1) {   // the rest of the chain, each level a 2:1 linear blit (a box filter) of the one above
         VkImageMemoryBarrier2 b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
         b.srcStageMask = b.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
         b.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
@@ -2392,8 +2555,8 @@ VkImageView VulkanBackend::BindTexture(const State& s, int stage, TexInfo& info,
             VkImageBlit bl{};
             bl.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l - 1, 0, 1};
             bl.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, 0, 1};
-            bl.srcOffsets[1] = {int32_t(std::max(d.width >> (l - 1), 1u)), int32_t(std::max(d.height >> (l - 1), 1u)), 1};
-            bl.dstOffsets[1] = {int32_t(std::max(d.width >> l, 1u)), int32_t(std::max(d.height >> l, 1u)), 1};
+            bl.srcOffsets[1] = {int32_t(std::max(tw >> (l - 1), 1u)), int32_t(std::max(th >> (l - 1), 1u)), 1};
+            bl.dstOffsets[1] = {int32_t(std::max(tw >> l, 1u)), int32_t(std::max(th >> l, 1u)), 1};
             d_.vkCmdBlitImage(cmd_, tx.img.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, tx.img.image,
                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bl, VK_FILTER_LINEAR);
         }
@@ -2982,6 +3145,43 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     draw_rt_ = rt;
     for (int i = 0; i < 4; i++) views[i] = BindTexture(s, i, info[i], from_target[i]);
     draw_rt_ = nullptr;
+    if (glow_stage_==1 && GlowCorrected() && views[0]) {
+        // Corrected glow: the game's first blur reads its bright pass (256x256, drawn at the render scale) through four
+        // taps 2 and 6 console texels apart. Above 1x those land on single fine pixels, a sparse sample of the picture
+        // that flickers as the camera moves and leaves the glow patchy. They read it averaged to the console's size
+        // instead: the same taps over what the console's 256x256 would hold.
+        TextureDesc d{};
+        Describe(s.textures[0],d);
+        auto source=targets_.find(uint64_t(d.data&0x7FFFFFFFu)<<1 | ReplayKey());
+        static const float none[4]={};
+        bool was=async_now_;
+        async_now_=false;   // made at once: left to the compiler thread, the blur read the sparse picture meanwhile
+        bool averaged=source!=targets_.end() && source->second.img.w>256 &&
+            ContinuousGlowPass(source->second.img,glow_avg_,256,256,3,none);
+        async_now_=was;
+        if (averaged) {
+            for (int i=0;i<4;i++) views[i]=glow_avg_.view;
+            static int told;
+            if (told++<2)
+                std::fprintf(stderr,"[GLOW] Corrected: the bright pass %ux%u averaged to 256x256 for the blur into %ux%u\n",
+                             source->second.img.w,source->second.img.h,rt?rt->img.w:0,rt?rt->img.h:0);
+        }
+    }
+    {   // A display-sized target read as a texture (the back buffer into the water's 256x256 screen copy, which the
+        // sword's trail and the hit rings read too): what drew into it ends a command buffer first, the rest in
+        // another (SplitCommands). NGB_D3D_SPLIT=0: one command buffer a frame, as before.
+        static const bool split = [] { const char* e = std::getenv("NGB_D3D_SPLIT"); return !(e && !std::strcmp(e, "0")); }();
+        for (int j = 0; j < 4 && split; j++) {
+            TextureDesc dj;
+            if (!from_target[j] || !s.textures[size_t(j)] || !Describe(s.textures[size_t(j)], dj)) continue;
+            auto tj = targets_.find(uint64_t(dj.data & 0x7FFFFFFFu) << 1 | ReplayKey());
+            if (tj != targets_.end() && tj->second.gw >= 640 && &tj->second != rt && tj->second.split_due) {
+                SplitCommands();
+                for (auto& t : targets_) t.second.split_due = false;   // all drawn so far is in the ended buffer
+                break;
+            }
+        }
+    }
     // A picture drawn at the render scale shrunk into a target at a smaller one -- the glow's chain: its 256x128 at
     // the render scale into its 128x128 at 1x -- was read once per pixel, a few texels of the many under it: above
     // 1x bright spots came and went as the camera moved (#213). Such a read now averages the texels under the pixel
@@ -3020,6 +3220,20 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     static const bool bumplog = std::getenv("NGB_D3D_BUMPLOG") != nullptr;
     if ((info[0].flags & kTexSigned) && bumplog) {   // the water's stage 0 sampling (#16)
         static int n;
+        if (n < 40) {   // where each stage's texture comes from (#234 #235)
+            std::string w;
+            for (int j = 0; j < 4; j++) {
+                TextureDesc dj;
+                if (!s.textures[size_t(j)] || !Describe(s.textures[size_t(j)], dj)) { w += " -"; continue; }
+                char b[160];
+                auto tj = targets_.find(uint64_t(dj.data & 0x7FFFFFFFu) << 1 | ReplayKey());
+                std::snprintf(b, sizeof(b), " t%d@%08X fmt %X %ux%u%s%s", j, dj.data, dj.format, dj.width, dj.height,
+                              from_target[j] ? " TARGET" : "", tj != targets_.end() && &tj->second == rt ? "(=rt,copy)" : "");
+                w += b;
+            }
+            std::fprintf(stderr, "[D3D] bump draw: rt @%08X %ux%u modes %05X:%s\n", rt ? rt->addr : 0, rt ? rt->gw : 0,
+                         rt ? rt->gh : 0, s.rs[kRsPsTextureModes], w.c_str());
+        }
         if (n++ < 6) {
             const auto& t = s.tss[0];
             std::fprintf(stderr, "[D3D] water stage 0: mag %u min %u mip %u maxmip %u lodbias %08X addr %u %u\n", t[kTssMagFilter],
@@ -3250,7 +3464,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     static int dbg_shadow = psdbg && !std::strcmp(psdbg, "shadow");
     if (dbg_shadow && pk.tex[0].shadow) { k.blend = 0; k.wmask = 0xF; }
     TextureDesc glow_desc{};
-    bool glow_pass = ContinuousGlowEnabled() && rt && rt->gw >= 640 && rt->gh >= 448 && a.pretransformed && !prog && !s.ps && count == 4 &&
+    bool glow_pass = (ContinuousGlowEnabled() || GlowCorrected() || GlowOff()) && rt && rt->gw >= 640 && rt->gh >= 448 && a.pretransformed && !prog && !s.ps && count == 4 &&
         from_target[0] && !info[0].shadow && k.blend && k.src == 1 && k.dst == 1 && k.op == 0x8006 &&
         !k.zen && k.wmask == 15 && s.tss[0][kTssColorOp] == 5 && s.tss[0][kTssColorArg1] == 2 &&
         s.tss[0][kTssColorArg2] == 3 && s.tss[1][kTssColorOp] == 1 &&
@@ -3272,10 +3486,15 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
             }
         }
     }
-    bool continuous_composite=glow_pass &&
-        continuous_record_[2].frame==frame_ && continuous_record_[2].data==(glow_desc.data&0x7FFFFFFFu);
-    glow_pass=continuous_composite;
-    if (glow_pass && GlowStrength()<1.0f) {
+    const ContinuousRecord& glow_made=ContinuousGlowEnabled()?continuous_record_[2]:glow_final_;
+    glow_pass=glow_pass && glow_made.frame==frame_ && glow_made.data==(glow_desc.data&0x7FFFFFFFu);
+    if (glow_pass && GlowOff()) {   // Bloom Off: the glow the game made is not added over the picture
+        static int told;
+        if (told++<2) std::fprintf(stderr,"[GLOW] Off: the glow's %ux%u not added over %ux%u\n",glow_desc.width,glow_desc.height,rt->gw,rt->gh);
+        async_now_ = false;   // (as below: the backend's own passes after this make their shaders at once)
+        return;
+    }
+    if (glow_pass && ContinuousGlowEnabled() && GlowStrength()<1.0f) {
         async_now_=false;
         pkey^=0x674C4F5753540001ull;k.ps=pkey;
         pmod=Module(pkey,[&] {return GlowStrengthHlsl(PixelHlsl(pk));},false);
@@ -3294,7 +3513,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
         if (async_) skipped_++;
         return;
     }
-    if (glow_pass && GlowSoftenMode()) {
+    if (glow_pass && (GlowSoftenMode() || GlowCorrected())) {
         auto source=targets_.find(uint64_t(glow_desc.data&0x7FFFFFFFu)<<1 | ReplayKey());
         if (source==targets_.end() || !SoftenGlow(source->second.img))
             ngb_renderer_fatal("Could not create the glow softening pass.");
@@ -3716,6 +3935,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
         }
     }
     if (rt && rt->gw >= 640) ngb_frame_draws++;
+    if (pk_.screen & 4) play_seen_ = true;
     if (!a.pretransformed && rt && rt->gw < 640) offscreen3d_++;
     if (!a.pretransformed && rt && rt->gw >= 640) {
         static const bool viewlog = std::getenv("NGB_D3D_VIEWLOG") != nullptr;   // debugging: the camera's direction
@@ -4174,6 +4394,7 @@ void VulkanBackend::Copy(const Surface& src, const Surface& dst, uint32_t count,
     d_.vkCmdBlitImage(cmd_, a->img.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, b->img.image,
                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, uint32_t(rs.size()), rs.data(), VK_FILTER_LINEAR);
     b->drawn = true;
+    b->split_due = true;
 }
 
 void VulkanBackend::Dump(Target& t, const char* name) {
@@ -4292,10 +4513,12 @@ void VulkanBackend::HudPlace(float x0, float x1, float y0, float y1, float w, fl
     // to a top corner from the screen's edge, and no larger than the karma window: the window and the health bar.
     // The Talisman of Rebirth's picture and flash, about the middle and as large as a panel, reach over the window,
     // and its figures were drawn as the picture's, apart from its words (#219); a panel's own labels start further in.
+    // (The health bar at its longest with the window is two thirds of the width: with a limit of 60%, the window
+    // split again on a revival late in the story, #219.)
     bool sided = false;
     for (const HudElem& e : hud_elems_)
         if (!e.gauge && e.ay == 0.0f && (e.ax == 0.0f ? e.x0 < w * 0.1f : e.ax == w && e.x1 > w * 0.9f) &&
-            e.x1 - e.x0 < w * 0.6f && e.y1 < h * 0.5f &&
+            e.x1 - e.x0 < w * 0.8f && e.y1 < h * 0.5f &&
             cx >= e.x0 && cx <= e.x1 && cy >= e.y0 && cy <= e.y1)
             sided = true;
     // what is on a picture about the middle (hud_picture_boxes_: a window's words) with it
@@ -4753,8 +4976,10 @@ void VulkanBackend::Present(const Surface& front) {
     pic_tex_ = 0;
     pic_x1_ = -1;
     offscreen3d_ = 0;
-    __atomic_store_n(&ngb_frame_done_2d, ngb_frame_draws > 0 && ngb_frame_3d_draws < 30, __ATOMIC_RELAXED);
+    __atomic_store_n(&ngb_frame_done_2d, ngb_frame_draws > 0 && ngb_frame_3d_draws < 30 && !play_seen_,
+                     __ATOMIC_RELAXED);
     ngb_frame_draws = ngb_frame_3d_draws = 0;
+    play_seen_ = false;
     hud_cover_ = 0;
     if (trace_) {
         static const char* nopic = std::getenv("NGB_TRACE_NOPIC");

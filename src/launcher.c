@@ -19,6 +19,9 @@
 #include <sys/stat.h>
 
 #include "launcher.h"
+#if defined(NGB_NV2A_VK)
+#include "nv2a_window.h"
+#endif
 #include "launcher_font.h"
 #include "port.h"
 
@@ -43,8 +46,8 @@ static const int SIZES_16_9[][2] = {
 static const int SIZES_16_10[][2] = {
     { 1280, 800 }, { 1440, 900 }, { 1680, 1050 }, { 1920, 1200 },
     { 2560, 1600 }, { 3840, 2400 }, { 0, 0 } };
-static const int SIZES_21_9[][2] = {     /* the "21:9" of the displays: 64:27 (2560 x 1080), 43:18 (3440 x 1440) */
-    { 1720, 720 }, { 2560, 1080 }, { 3440, 1440 }, { 5120, 2160 }, { 0, 0 } };
+static const int SIZES_21_9[][2] = {     /* the "21:9" of the displays: 64:27 (2560 x 1080), 43:18 (3440 x 1440), 12:5 (3840 x 1600, #233) */
+    { 1720, 720 }, { 2560, 1080 }, { 3440, 1440 }, { 3840, 1600 }, { 5120, 2160 }, { 0, 0 } };
 static const int SIZES_32_9[][2] = {     /* two 16:9 screens side by side (#74) */
     { 2560, 720 }, { 3840, 1080 }, { 5120, 1440 }, { 7680, 2160 }, { 0, 0 } };
 
@@ -207,6 +210,8 @@ void ngb_settings_load(NgbSettings *s)
             s->talisman = atoi(val) != 0;
         } else if (!strcmp(key, "frame_interpolation")) {
             s->frame_interp = atoi(val) < 0 ? 0 : atoi(val) > 3 ? 3 : atoi(val);   /* 0 off, 1 Full Rate, 2 Half Rate, 3 2x */
+        } else if (!strcmp(key, "text_language")) {
+            s->text_language = !SDL_strncasecmp(val, "en", 2) ? 1 : !SDL_strncasecmp(val, "ja", 2) ? 2 : 0;   /* english, en, Japanese, ja... */
         } else if (!strcmp(key, "bow_crosshair")) {
             s->bow_crosshair = atoi(val) != 0;
         } else if (!strcmp(key, "hud_aspect")) {
@@ -215,8 +220,10 @@ void ngb_settings_load(NgbSettings *s)
             s->show_hud = atoi(val) != 0;
         } else if (!strcmp(key, "positional_audio")) {
             s->positional_audio = atoi(val) < 0 ? 0 : atoi(val) > 3 ? 3 : atoi(val);   /* 0 off, 1 console, 2 clear, 3 mixed */
-        } else if (!strcmp(key, "smoother_glow")) {
-            s->smooth_glow = atoi(val) != 0;
+        } else if (!strcmp(key, "smoother_glow")) {   /* before 0.9.73: its softer glow on is Corrected now */
+            s->smooth_glow = atoi(val) != 0 ? 2 : 0;
+        } else if (!strcmp(key, "bloom")) {   /* 0 Original, 2 Corrected, 3 Off (1 was Reduced: Corrected now) */
+            s->smooth_glow = atoi(val) == 1 ? 2 : atoi(val) < 0 ? 0 : atoi(val) > 3 ? 3 : atoi(val);
         } else if (!strcmp(key, "detail_under_load")) {
             s->detail_under_load = atoi(val) != 0;
         } else if (!strcmp(key, "defaults")) {
@@ -289,7 +296,7 @@ void ngb_settings_save(const NgbSettings *s)
     fprintf(f, "unlock_movie_theater = %d\n", s->unlock[2]);
     fprintf(f, "movie_ratio = %s\n", s->movie_43 ? "4:3" : "16:9");
     fprintf(f, "shadow_resolution = %d\n", s->shadow_scale);
-    fprintf(f, "smoother_glow = %d\n", s->smooth_glow);
+    fprintf(f, "bloom = %d\n", s->smooth_glow);   /* 0 Original, 2 Corrected, 3 Off */
     fprintf(f, "detail_under_load = %d\n", s->detail_under_load);
     fprintf(f, "render_thread = %d\n", s->render_thread);
     fprintf(f, "essence_only_charging = %d\n", s->essence_charging);
@@ -301,6 +308,7 @@ void ngb_settings_save(const NgbSettings *s)
     fprintf(f, "hud_aspect = %d\n", s->hud_aspect);
     fprintf(f, "talisman_of_rebirth = %d\n", s->talisman);
     fprintf(f, "bow_crosshair = %d\n", s->bow_crosshair);
+    fprintf(f, "text_language = %s\n", s->text_language == 2 ? "japanese" : s->text_language == 1 ? "english" : "auto");
     fprintf(f, "frame_interpolation = %d\n", s->frame_interp);
     fprintf(f, "audio_output = %d\n", s->audio_output);
     fprintf(f, "quick_menu_freeze = %d\n", s->quick_menu_freeze);
@@ -315,7 +323,25 @@ double ngb_settings_aspect_ratio(const NgbSettings *s)
     switch (s->aspect) {
     case ASPECT_4_3:   return 4.0 / 3.0;
     case ASPECT_16_10: return 16.0 / 10.0;
-    case ASPECT_21_9:  return 64.0 / 27.0;
+    case ASPECT_21_9: {
+        /* "21:9" is three shapes among displays: 64:27 (2560 x 1080), 43:18 (3440 x 1440) and 12:5 (3840 x 1600).
+         * The screen's own between them, as the window is or the display in fullscreen; 64:27 drew bars a few
+         * dozen pixels wide at the sides of the other two (#233). */
+        int w = s->width, h = s->height;
+#if defined(NGB_NV2A_VK)
+        int ew, eh;
+        if (nv2a_window_extent(&ew, &eh) == 0) {   /* the game's window as it is: followed as it changes (src/ingame_menu.c) */
+            w = ew;
+            h = eh;
+        } else if (s->fullscreen) {
+            return 64.0 / 27.0;                    /* (the display's shape once the window is up) */
+        }
+#endif
+        double r = h > 0 ? (double)w / h : 0, lo = 64.0 / 27.0, hi = 12.0 / 5.0;
+        if (r < lo * 0.995 || r > hi * 1.005)      /* (a little either side: sizes rounded by display scaling) */
+            return lo;
+        return r < lo ? lo : r > hi ? hi : r;
+    }
     case ASPECT_32_9:  return 32.0 / 9.0;
     default:           return 16.0 / 9.0;
     }
@@ -568,6 +594,7 @@ int ngb_launcher_run(NgbSettings *s)
     win = SDL_CreateWindow(NGB_WINDOW_TITLE, SDL_WINDOWPOS_CENTERED,
                            SDL_WINDOWPOS_CENTERED, LW, LH,
                            SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+    SDL_StopTextInput();         /* no typing here: no input method's window over it (see present_sdl.c) */
     r = win ? SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED |
                                           SDL_RENDERER_PRESENTVSYNC) : NULL;
     if (r == NULL && win)

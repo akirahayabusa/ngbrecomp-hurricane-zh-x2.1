@@ -68,6 +68,24 @@ static void apply_aspect(NgbSettings *s, bool window)
         nv2a_window_request(s->width, s->height, s->fullscreen);
 }
 
+/* 21:9's shape is the window's (64:27, 43:18 or 12:5, ngb_settings_aspect_ratio): taken again when the window
+ * changes size -- fullscreen and back, a size from a menu, the display's shape once the window is up (#233).
+ * Each frame, from src/pc_menu.c. */
+void ngb_aspect_follow_window(void)
+{
+    static int lw, lh;
+    int w, h;
+    if (nv2a_window_extent(&w, &h) != 0 || (w == lw && h == lh))
+        return;
+    lw = w;
+    lh = h;
+    if (s_running.aspect != ASPECT_21_9)
+        return;
+    double a = ngb_settings_aspect_ratio(&s_running);
+    ngb_game_set_aspect(1, a);
+    nv2a_present_set_aspect(a);
+}
+
 void ngb_menu_set_running(const NgbSettings *s)
 {
     s_running = *s;
@@ -82,8 +100,8 @@ void ngb_menu_set_running(const NgbSettings *s)
  * startup, 10 MSAA samples (1, 2, 4, 8); 1 is the anisotropy (0, 2-16);
  * 11-13 the cheats (src/cheats.c: infinite health, ninpo, essence), 14 every
  * difficulty from the start (src/cheats.c, saved), 15 the golden scarabs
- * cheat, 16 every costume (saved), 17 an extra costume (0-3, saved), 18 Smoother
- * Glow (src/d3d/vk/glow_options.h), 19 quick-menu pause, 20 quick-menu scale (100..0
+ * cheat, 16 every costume (saved), 17 an extra costume (0-3, saved), 18 Bloom
+ * (0 Original, 2 Corrected, 3 Off: src/d3d/vk/glow_options.h), 19 quick-menu pause, 20 quick-menu scale (100..0
  * percent, in tens), 21 infinite items, 22 infinite projectiles (cheats, src/cheats.c), 23 positional
  * audio (0 off, 1 the HRTF filters, 2 clear, their levels only; #30, #86), 24 the HUD (src/hud.c, #80), 25 the audio
  * output (0 auto, 1 stereo, 2 5.1; src/audio), 26-28 the main menu's MISSIONS, ARCADE NINJA GAIDEN and
@@ -107,6 +125,16 @@ int ngb_positional_step(int v, int step)
     while (i < 4 && order[i] != v)
         i++;
     return order[((i < 4 ? i : 0) + (step > 0 ? 1 : 3)) % 4];
+}
+
+/* Bloom's next value: Original, Corrected, Off (0, 2, 3; 1 was Reduced, now only by NGB_BLOOM=1, for comparing) */
+int ngb_glow_step(int v, int step)
+{
+    static const int order[3] = { 0, 2, 3 };
+    int i = 0;
+    while (i < 3 && order[i] != v)
+        i++;
+    return order[((i < 3 ? i : 0) + (step > 0 ? 1 : 2)) % 3];
 }
 
 int ngb_pc_setting(int which)
@@ -193,7 +221,7 @@ void ngb_pc_set_setting(int which, int value)
     case 5: s_running.show_fps = value; nv2a_present_set_show_fps(value); break;
     case 8: s_running.skip_intro = value; break;        /* both at the next start */
     case 9: s_running.show_launcher = value; break;
-    case 18: s_running.smooth_glow = !!value; break;
+    case 18: s_running.smooth_glow = value == 1 ? 2 : value < 0 ? 0 : value > 3 ? 3 : value; break;
     case 23: s_running.positional_audio = value < 0 ? 0 : value > 3 ? 3 : value; ngb_audio_set_positional(s_running.positional_audio); break;
     case 24: s_running.show_hud = !!value; break;
     case 41: s_running.hud_style = !!value; break;

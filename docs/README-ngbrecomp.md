@@ -47,7 +47,10 @@ release** (NTSC-U, title ID `5443000D`) and checks for it.
 - Keyboard and mouse with key prompts in the game, Xbox, PlayStation and Nintendo button prompts,
   rebindable controls for keyboard, mouse and controller (Ninpo and Wind Run on any two buttons),
   mouse support in the menus
-- Mods: replacement game files in a `mods` folder, without touching the installed game
+- Mods: replacement game files in a `mods` folder, without touching the installed game; texture packs (PNG
+  files in a `textures` folder; `NV2A_TEX_DUMP=<folder>` writes the game's textures to start from)
+- Saves that share a slot number (copied in by hand) no longer hide each other: the older ones are moved to a
+  `saves-not-shown` folder next to the saves, after a backup; nothing is deleted
 - Skippable intros, movies and cutscenes (an option), unlock-all options for difficulties and costumes, optional cheats
 - The arcade Ninja Gaiden on the Han's Bar cabinet and the main menu, recompiled as well
 - Sound mixed on the PC: positional 3D sound, the console's room reverb, and 5.1 surround on a 5.1 or
@@ -144,6 +147,9 @@ packages are signed ad hoc, without Developer ID signing or notarization.
 | Shader cache | `~/.cache/NinjaGaidenBlack` | `%LOCALAPPDATA%\NinjaGaidenBlack\shaders` | `~/Library/Application Support/NinjaGaidenBlack/cache/NinjaGaidenBlack/shaders` | `cache` in the folder above |
 | Log | the terminal, or `log.txt` beside the saves when started without one | `log.txt` beside the saves (or the console it was started from) | `log.txt` beside the saves | `log.txt` beside the saves |
 
+**Text language:** the game's text follows the system's language, Japanese on a Japanese system and English
+otherwise (the disc has only these two). `text_language = japanese` or `english` in `settings.ini` overrides it.
+
 **Portable mode:** with a file named `portable.txt` next to `NinjaGaidenBlack.exe` (or the AppImage or Mac app),
 all of these go into a `userdata` folder next to it instead. The first-run setup offers this as a
 checkbox. The folder must be writable, so not inside Program Files. Delete `portable.txt` to go back.
@@ -170,8 +176,8 @@ of the pause menu. Changes apply at once and are saved.
 </table>
 
 - **Graphics**: render resolution (1x–10x), texture filtering (the console's, or 2x–16x
-  anisotropic), anti-aliasing (MSAA), shadow resolution, Smoother Glow (a softer, fainter glow on
-  bright lights; off is the console's look), Lower Detail Under Load, Multithreaded Renderer (drawing on a
+  anisotropic), anti-aliasing (MSAA), shadow resolution, Bloom (Original, the console's; Corrected, the
+  same bloom kept steady and even at any render resolution; Off), Lower Detail Under Load, Multithreaded Renderer (drawing on a
   thread of its own, for slower CPUs; on by default on Android, off unless chosen on a PC), Frame
   Interpolation (experimental: pictures made between the game's 60 frames a second, for displays of 120 Hz
   and up; Full Rate, Half Rate or 2x)

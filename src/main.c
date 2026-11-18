@@ -58,6 +58,7 @@
 #include "usb/usb_gamepad.h"
 extern void xbox_InputInit(void);
 #if defined(NGB_NV2A_VK)
+#include <SDL_locale.h>   /* SDL_GetPreferredLocales: the text language (#236); not SDL.h (its main) */
 #include "launcher.h"
 #include "quick_select.h"
 
@@ -907,6 +908,8 @@ static void *guest_main(void *unused)
         char save_dir[4096];
         save_dir_path(save_dir, sizeof(save_dir));
         printf("Save directory: %s\n", save_dir);
+        extern void ngb_save_slots_fix(const char *save_dir);   /* src/save_slots.c: one save a slot number */
+        ngb_save_slots_fix(save_dir);
         xbox_path_init(s_game_dir, save_dir);
     }
     xbox_kernel_bridge_init();
@@ -1353,6 +1356,13 @@ int main(int argc, char **argv)
     /* Widescreen (16:9 and 16:10 alike: the game's anamorphic mode, shown
      * at the chosen shape) unless 4:3. */
     s_widescreen = cfg.aspect != ASPECT_4_3;
+    /* The text's language, which the game takes from the dashboard's at boot (#236): settings.ini's text_language,
+     * else the system's first preferred language -- Japanese on a Japanese system, as on a Japanese console. The
+     * disc has English and Japanese text only. */
+    /* Hurricane: not taken (user 2026-11-18) -- x2.1 sets the text to Chinese at every boot whatever the dashboard
+     * says (localization docs/17 section 7), and every build so far answered English; the dashboard stays English. */
+    xbox_XcLanguage = 1;
+    (void)cfg.text_language;
 #else
     {
         const char *ws = getenv("NGB_WIDESCREEN");

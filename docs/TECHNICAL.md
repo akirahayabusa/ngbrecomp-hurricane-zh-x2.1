@@ -44,7 +44,8 @@ The game's 34 DirectSound calls (`tools/dsound_symbols.txt`, named by XbSymbolDa
 (`tools/take_dsound.py [trilogy|tomoe]`: `src/audio/dsound_hooks.c` and `dsound_hooks_arcade.c`, the recompiled
 bodies kept in `dsound_orig*.c`, the arcade's left out of its generation by `src/manual_functions_arcade.json`) and taken by a host mixer (`src/audio/dsound_hle.cpp`, after SCDA-XBERecomp's,
 `src/audio/NOTICE`): each sound buffer read from guest memory as it plays (PCM and Xbox ADPCM, its
-loop region, pitch, volume and mix bins -- a bin a buffer lists twice plays twice, as the chip adds every
+loop region, pitch -- resampled to 48 kHz through eight samples about the position, Lagrange weights, since 0.9.72;
+a straight line between two before --, volume and mix bins -- a bin a buffer lists twice plays twice, as the chip adds every
 slot, and each bin takes its headroom, the library's one step unless the program sets it: the game sets
 none, the arcade leaves it), position notifications (the arcade's double buffer: set at its next
 `DirectSoundDoWork`, on its own thread), the library's 3D pass (distance, rolloff, the direction by its own octant estimate), and dsstdfx's
@@ -58,7 +59,8 @@ byte): "Console" filters it as the chip does, "Clear" (the default from 0.9.40 t
 takes only each ear's level from its filter, the pair scaled to constant power (0.9.40 alone used each filter's RMS gain, +2 to +5 dB by direction, heard as boomy), "Mixed" (the default since 0.9.52) is half Console's filters (brought to Clear's power) and half a level pan by the direction, the far ear 6 dB down for a sound straight to one side (`NGB_MIX_PAN_DB`; Clear's levels a few dB apart left sounds hard to place, #126), "Off" plays it centred. Audio Output (Sound; the arcade has it from the game, `NGB_AUDIO_OUTPUT`) is
 Stereo, 5.1, or Auto: 5.1 when the default output device has six channels or more. On 5.1 the program is
 told its speakers are surround (with Dolby Digital) and mixes for them, and the output is FL FR C LFE BL
-BR; on stereo the centre is folded into the front pair. `NGB_AUDIO_CHANNELS=2|6` overrides it,
+BR; on stereo the centre is folded into the front pair at -3 dB, and the back pairs into their sides at -3 dB too
+(at full level before 0.9.72). `NGB_AUDIO_CHANNELS=2|6` overrides it,
 `NGB_AUDIO_ENGINE=apu` goes back to the recompiled library on the emulated chip (xemu's voice
 processor, 0.9.29 and before: no reverb, no 5.1). `NGB_DSOUND_LOG=1` logs the calls (`=3` every Lock, `=2` every volume
 change too), `NGB_DSOUND_WAV=<file>` records what plays (either engine), `NGB_DSOUND_REVERB=0` leaves the
@@ -139,7 +141,10 @@ was not (a loading pause). Presented at the tick, every frame waited a whole ref
 GPU-command thread, presents came out unevenly. V-Sync's Mailbox is mailbox where the system has it
 (no tearing, no queue: a FIFO queue fills against the game's own clock and adds 30-50 ms), FIFO on as
 few images as allowed where it has not; its FIFO is FIFO (every frame in turn: steadier where
-mailbox, like Nvidia's Fast sync, now and then shows a frame twice, #17); Off is immediate. `NV2A_FPS_LOG=1` logs the frame rate and
+mailbox, like Nvidia's Fast sync, now and then shows a frame twice, #17); Off is immediate. A picture larger than
+the window is halved exactly (2:1 blits) while more than 2:1 is left, then brought to the window by area: each window
+pixel the average of the picture pixels under it, weighted by how much of each it covers (0.9.72; a bilinear blit
+before, which shimmered at ratios like 1.8:1; `NV2A_AREA_DOWNSCALE=0` goes back to it). Upscaling is a bilinear blit. `NV2A_FPS_LOG=1` logs the frame rate and
 `[LAT]` lines: each picture's age when presented and the spacing of presents.
 
 ## Settings, menus and features
@@ -172,6 +177,11 @@ counter, and skipping the intros (the boot movie, which the game itself will not
 the New Game prologue and the story movies play -- the game's own Start does not end the prologue -- and
 Skip Any Cutscene lets Start end them; from the next start). They are saved to `~/.config/NinjaGaidenBlack/settings.ini` as they change.
 `--settings` shows the old settings screen before the game.
+
+The text's language (#236) is the dashboard's, which the game reads at boot (XC_LANGUAGE, and the EEPROM's user
+section): `xbox_XcLanguage`, set in `src/main.c` from `text_language` in settings.ini (`auto`, `english`, `japanese`;
+no menu row), auto taking SDL's first preferred locale (Japanese for `ja`, else English). The 21:9 aspect takes the
+window's own shape between 64:27 and 12:5 (`ngb_settings_aspect_ratio`), followed as the window changes (#233).
 
 All Difficulties (Cheats > Unlocks, saved): New Game offers every difficulty, Ninja Dog to Master Ninja,
 without clearing the one before (or dying for Ninja Dog). The game's menus ask one function (sub_001DB520, now in
@@ -222,7 +232,9 @@ frame -- the game keeps it per segment at 0x58A534, maxima at 0x58A524, and 0x58
 sum; a single blow taking all of it at once still kills), Infinite Ninpo (0x58A56C/0x58A56E),
 Infinite Essence (0x589570, the game's cap of 99,999) and Golden Scarabs (enough in the bag --
 inventory slots at 0x5891D0, item 0x59 -- to make 50 with those already given to Muramasa,
-0x589574: every one of his rewards at the next visit). All Weapons puts every melee and projectile
+0x589574: every one of his rewards at the next visit; his reward table, live00.afs, holds the harder
+difficulties' 49th and 50th until Chapter 9, which the cheat does not wait for: sub_001868F0 in
+`src/cheats.c`, #247). All Weapons puts every melee and projectile
 weapon Black gives in the bag, or raises it, at its highest level (a weapon's count is its level; Lunar
 and Kitetsu are one item a level, 0x12B/0x133/0x134 and 0x182/0x0CC/0x183, and a lower one held
 becomes the top one), with a full stack of what it fires once a game is loaded: the Strongbow, the
@@ -239,8 +251,9 @@ checksums (sub_00164E50) and returns to the title when one changes without the f
 code sets (0x7F1A94 + n); a cheat that writes sets them all. Unlocks also has All
 Costumes (saved): the Costume Selection at New Game offers every costume, as after clearing
 the game, through the same flag function as All Difficulties (flags 1-4). The game has eight costumes (chr_ryu.afs, chr_ryua-g.afs) and its Costume Selection
-lists five (0 and 4-7, the table at 0x3E9D10), the locked ones as white shapes; here it lists only
-those unlocked (`src/costume_menu.c`), and with All Costumes on costumes 1-3 too, after the game's five:
+lists five (0 and 4-7, the table at 0x3E9D10), the locked ones as white shapes, as here too
+(`src/costume_menu.c`; until 0.9.73 the locked ones were left out, #246), and with All Costumes on costumes
+1-3 too, after the game's five:
 the game has no pictures of them, so each is its default costume's picture as a silhouette with
 the name across it (EXTRA 1-3, made at run time from the player's copy, `src/pause_tab.c`).
 Debugging aids there: `NGB_CHEATS=111` turns them on at start, `NGB_POKE=addr:bytes:value,...`
@@ -414,6 +427,13 @@ case-blind). Game files taken from mods are listed in `<save folder>/mods-cache.
 game's own file is put back over its cached copy at the next start (the game never checks its cache again).
 The quick menu's icons read `spr.afs` the same way. The log names each file taken (`[MODS]`).
 
+Save slots (`src/save_slots.c`): the game lists its saves by the number each name starts with ("2. CHAPTER 7
+004:51" is No. 2, 1 to 30) and shows one save a number, so two saves of one number (copied in by hand, or left by
+saving over a slot on Linux before 0.9.10) hid each other. At each start, of a number's saves the newest stays and
+the others are moved, as they are, to `<save folder>/saves-not-shown`, from where a player can bring one back by
+hand. Nothing is deleted or changed, and the saves are copied to `<save folder>/save-backup/<date and time>` before
+the first move. The log names each (`[SAVES]`). `NGB_SAVE_SLOTS=0` leaves them as they are.
+
 In the game's menus (main menu, Options, the pause menu and its tabs, message boxes) the mouse
 points: the game's own cursor follows it onto the item under it (a press of the pad at a time,
 so the game moves it as it would), a click there chooses it, a right click is B, the wheel
@@ -496,6 +516,15 @@ Push descriptors are used where the driver has them, else a descriptor set per d
 `NGB_RENDERER=xemu` draws with xemu's NV2A renderer instead, as before (on Steam:
 `NGB_RENDERER=xemu %command%`). `NGB_RENDERER=mirror` keeps xemu drawing and showing the game
 and renders with the new one unseen, for comparing (`NGB_D3D_DUMP=dir` writes its frames).
+
+Texture packs (#249): a PNG named by a texture's id in the `textures` folder beside the saves
+(`%LOCALAPPDATA%\NinjaGaidenBlack\textures`, `~/.local/share/NinjaGaidenBlack/textures`,
+`NV2A_TEX_REPLACE=dir` for another) is drawn instead of that texture, at its own size (the same
+aspect ratio, at most 8192 a side), with mipmaps made for it when it is opaque or the game's texture had its own. `NV2A_TEX_DUMP=dir` writes each texture the game uses, once,
+as `<id>.png`: the names to keep when editing or upscaling them. The id is a hash of the texture's
+bytes, palette, format and size, so a texture the game changes as it plays is a new one. Plain 2D
+textures only: not cube maps, the water's bump maps, nor linear (screen-sized) ones. The two
+renderers name textures differently; xemu's has its own packs.
 
 ## Bring-up tools
 
