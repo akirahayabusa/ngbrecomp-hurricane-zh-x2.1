@@ -68,7 +68,7 @@ static void apply_aspect(NgbSettings *s, bool window)
         nv2a_window_request(s->width, s->height, s->fullscreen);
 }
 
-/* 21:9's shape is the window's (64:27, 43:18 or 12:5, ngb_settings_aspect_ratio): taken again when the window
+/* 21:9's shape is the window's (from a phone's 2:1 to 12:5, ngb_settings_aspect_ratio): taken again when the window
  * changes size -- fullscreen and back, a size from a menu, the display's shape once the window is up (#233).
  * Each frame, from src/pc_menu.c. */
 void ngb_aspect_follow_window(void)
@@ -101,7 +101,7 @@ void ngb_menu_set_running(const NgbSettings *s)
  * 11-13 the cheats (src/cheats.c: infinite health, ninpo, essence), 14 every
  * difficulty from the start (src/cheats.c, saved), 15 the golden scarabs
  * cheat, 16 every costume (saved), 17 an extra costume (0-3, saved), 18 Bloom
- * (0 Original, 2 Corrected, 3 Off: src/d3d/vk/glow_options.h), 19 quick-menu pause, 20 quick-menu scale (100..0
+ * (2 On, 3 Off: src/d3d/vk/glow_options.h), 19 quick-menu pause, 20 quick-menu scale (100..0
  * percent, in tens), 21 infinite items, 22 infinite projectiles (cheats, src/cheats.c), 23 positional
  * audio (0 off, 1 the HRTF filters, 2 clear, their levels only; #30, #86), 24 the HUD (src/hud.c, #80), 25 the audio
  * output (0 auto, 1 stereo, 2 5.1; src/audio), 26-28 the main menu's MISSIONS, ARCADE NINJA GAIDEN and
@@ -127,14 +127,11 @@ int ngb_positional_step(int v, int step)
     return order[((i < 4 ? i : 0) + (step > 0 ? 1 : 3)) % 4];
 }
 
-/* Bloom's next value: Original, Corrected, Off (0, 2, 3; 1 was Reduced, now only by NGB_BLOOM=1, for comparing) */
+/* Bloom's next value: On, Off (2, 3; 0 Original and 1 Reduced only by NGB_BLOOM, for comparing) */
 int ngb_glow_step(int v, int step)
 {
-    static const int order[3] = { 0, 2, 3 };
-    int i = 0;
-    while (i < 3 && order[i] != v)
-        i++;
-    return order[((i < 3 ? i : 0) + (step > 0 ? 1 : 2)) % 3];
+    (void)step;
+    return v == 3 ? 2 : 3;
 }
 
 int ngb_pc_setting(int which)
@@ -183,6 +180,7 @@ int ngb_pc_setting(int which)
     case 43: return 1;   /* Hurricane: upstream's Talisman of Rebirth not taken -- x2.1 switches it itself */
     case 44: return 0;   /* Hurricane: upstream's Bow Crosshair not taken -- x2.1 has its own (画面设置) */
     case 45: return s_running.frame_interp;
+    case 46: return s_running.cheats_unlocked;
     case 29: return s_running.detail_under_load;
     case 30: return s_running.render_thread;
     case 33: return s_running.essence_charging;
@@ -221,7 +219,7 @@ void ngb_pc_set_setting(int which, int value)
     case 5: s_running.show_fps = value; nv2a_present_set_show_fps(value); break;
     case 8: s_running.skip_intro = value; break;        /* both at the next start */
     case 9: s_running.show_launcher = value; break;
-    case 18: s_running.smooth_glow = value == 1 ? 2 : value < 0 ? 0 : value > 3 ? 3 : value; break;
+    case 18: s_running.smooth_glow = value == 3 ? 3 : 2; break;
     case 23: s_running.positional_audio = value < 0 ? 0 : value > 3 ? 3 : value; ngb_audio_set_positional(s_running.positional_audio); break;
     case 24: s_running.show_hud = !!value; break;
     case 41: s_running.hud_style = !!value; break;
@@ -229,6 +227,7 @@ void ngb_pc_set_setting(int which, int value)
     case 43: s_running.talisman = !!value; break;
     case 44: s_running.bow_crosshair = !!value; break;
     case 45: s_running.frame_interp = value < 0 ? 0 : value > 3 ? 3 : value; break;   /* at the next frame (src/d3d/hle.cpp) */
+    case 46: s_running.cheats_unlocked = !!value; break;
     case 29: s_running.detail_under_load = !!value; break;
     case 30: s_running.render_thread = !!value; break;   /* at the next start */
     case 33: s_running.essence_charging = !!value; break;
@@ -254,6 +253,22 @@ void ngb_pc_set_setting(int which, int value)
         nv2a_set_quality(s_running.scale, s_running.anisotropy, s_running.shadow_scale, s_running.msaa);
     if (!getenv("NGB_NO_SETTINGS"))
         ngb_settings_save(&s_running);
+}
+
+/* The Cheats open to use: asked once ("Do you want to use cheats?", src/pause_tab.c), or one already on -- a cheat
+ * (NGB_CHEATS too), or an unlock saved before the question was there -- so nothing is taken from a player who used
+ * them; that kept as the answer (turning the last one off hid the tab under the player's cursor). */
+int ngb_cheats_unlocked(void)
+{
+    if (ngb_pc_setting(46))
+        return 1;
+    int on = ngb_pc_setting(14) || ngb_pc_setting(16) || ngb_pc_setting(26) || ngb_pc_setting(27) ||
+             ngb_pc_setting(28);
+    for (int i = 0; i < 10 && !on; i++)
+        on = ngb_cheat(i);
+    if (on)
+        ngb_pc_set_setting(46, 1);
+    return on;
 }
 
 /* Opens the recomp settings menu at the next frame (the main menu's "RECOMP SETTINGS"). */
@@ -314,13 +329,32 @@ static uint64_t mono_ms(void)
 }
 
 static volatile uint64_t s_tab_seen;      /* last frame the tab was shown */
+static volatile uint32_t s_tab_seen_frame = (uint32_t)-2;   /* and the game's frame count then (not shown at boot) */
+static volatile uint32_t s_game_frames;   /* the frames the game drew (Swap) */
 static volatile int s_tab_focus;          /* its page has the pad */
 static volatile int s_tab_keys[16];
 static volatile unsigned s_tab_head, s_tab_tail;
 
+/* Each frame the game draws (Swap, src/cheats.c's ngb_frame_tick) */
+void ngb_tab_game_frame(void)
+{
+    __atomic_add_fetch(&s_game_frames, 1, __ATOMIC_RELEASE);
+}
+
+static void tab_mark(uint64_t now)
+{
+    s_tab_seen_frame = __atomic_load_n(&s_game_frames, __ATOMIC_ACQUIRE);
+    s_tab_seen = now;
+}
+
+/* Gone only after 250 ms AND a whole game frame without the tab: on a slow
+ * phone the renderer presented a frame over 250 ms late (the game waiting on
+ * it, the tab marked before), and the page let go of the pad while still shown,
+ * a "back" nobody pressed (#261). */
 static bool tab_shown(void)
 {
-    return mono_ms() - s_tab_seen < 250;
+    return mono_ms() - s_tab_seen < 250 ||
+           __atomic_load_n(&s_game_frames, __ATOMIC_ACQUIRE) - s_tab_seen_frame < 2;
 }
 
 static void tab_push(int k)
@@ -381,7 +415,7 @@ int ngb_pause_tab_key(int *focus)
     {
         extern int ngb_bind_capturing(void);   /* src/bindings.c: the page waits for a key to bind */
         if (ngb_bind_capturing() && *focus) {
-            s_tab_seen = now;
+            tab_mark(now);
             s_tab_prev = pad_bits();           /* what is pressed meanwhile is the binding's */
             while (tab_pop())
                 ;
@@ -390,12 +424,12 @@ int ngb_pause_tab_key(int *focus)
     }
     if (*focus && !s_tab_focus)            /* given back meanwhile */
         *focus = 0;
-    if (now - s_tab_seen > 250) {          /* just shown: what is held does nothing */
+    if (!tab_shown()) {                    /* just shown: what is held does nothing */
         s_tab_prev = pad_bits();
         while (tab_pop())
             ;
     }
-    s_tab_seen = now;
+    tab_mark(now);
     uint32_t b = pad_bits(), pressed = b & ~s_tab_prev;
     if (xbox_InputKeyboardActive())
         pressed &= ~XBOX_GAMEPAD_START;    /* Enter's: the keys come as keys (nv2a_window_event_hook) */
@@ -444,10 +478,26 @@ int ngb_pause_tab_key(int *focus)
         return 0;                          /* the game's pad meanwhile */
     }
     if (key == KEY_BACK) {
+        static int log = -1;   /* NGB_TAB_LOG=1 (debugging, #261): where a back came from */
+        if (log < 0)
+            log = getenv("NGB_TAB_LOG") != NULL;
+        if (log)
+            fprintf(stderr, "[TAB] back: pad %08X pressed %08X (B %d, Start %d, queued %d)\n", b, pressed,
+                    !!(pressed & (1u << 17)), !!(pressed & XBOX_GAMEPAD_START),
+                    !(pressed & ((1u << 17) | XBOX_GAMEPAD_START)));
         *focus = s_tab_focus = 0;
         s_wait_release = true;             /* the game gets the pad once let go */
     }
     if (pressed & (3u << 18)) {            /* L or R: to the next tab, as the game's pages do */
+        if (getenv("NGB_TAB_LOG")) {       /* (#261: the triggers' values, a cheap pad's may drift) */
+            XBOX_INPUT_STATE st;
+            int lt = -1, rt = -1;
+            if (xbox_InputGetState(0, &st) == 0) {
+                lt = st.Gamepad.bAnalogButtons[6];
+                rt = st.Gamepad.bAnalogButtons[7];
+            }
+            fprintf(stderr, "[TAB] let go: L/R pad %08X pressed %08X (triggers %d %d)\n", b, pressed, lt, rt);
+        }
         *focus = s_tab_focus = 0;
         s_wait_release = false;
         usb_gamepad_block = 0;             /* now: the game sees the press */
@@ -463,7 +513,7 @@ void ngb_tab_take_pad(void)
     s_tab_focus = 1;
     usb_gamepad_block = 1;
     s_wait_release = false;
-    s_tab_seen = mono_ms();
+    tab_mark(mono_ms());
     s_tab_prev = pad_bits();               /* what is held now does nothing */
 }
 
@@ -1216,6 +1266,9 @@ static bool game_mouse(const SDL_Event *ev)
             ngb_pause_tab_page() != 2) {
             game_point(ev->button.windowID, ev->button.x, ev->button.y, &gx, &gy);
             if (tab_item_at(gx, gy)) {            /* a tab along the top: the page lets go, hover_tick goes there */
+                if (s_tab_focus && getenv("NGB_TAB_LOG"))
+                    fprintf(stderr, "[TAB] let go: click on a tab at %.0f,%.0f (touch %d)\n", gx, gy,
+                            ev->button.which == SDL_TOUCH_MOUSEID);
                 if (s_tab_focus) {
                     s_tab_focus = 0;
                     s_wait_release = false;
@@ -1250,6 +1303,8 @@ static bool game_mouse(const SDL_Event *ev)
                 return true;
             }
             if (ev->button.button == SDL_BUTTON_RIGHT && s_tab_focus) {
+                if (getenv("NGB_TAB_LOG"))
+                    fprintf(stderr, "[TAB] back: right click (touch %d)\n", ev->button.which == SDL_TOUCH_MOUSEID);
                 tab_push(KEY_BACK);
                 return true;
             }
@@ -1484,6 +1539,9 @@ bool nv2a_overlay_wanted(void)
     mouse_test_tick();
     uint32_t b = pad_bits();
     if (s_tab_focus && !tab_shown()) {     /* the menu went: give the pad back */
+        if (getenv("NGB_TAB_LOG"))
+            fprintf(stderr, "[TAB] page let go of the pad: not seen for %llu ms\n",
+                    (unsigned long long)(mono_ms() - s_tab_seen));
         s_tab_focus = 0;
         s_wait_release = true;
     }

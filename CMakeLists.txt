@@ -157,6 +157,7 @@ add_library(ngb_gen OBJECT ${RECOMP_GEN_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hud.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ut_charge.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/cutscene_skip.c
+    # (src/talisman.c not built: x2.1 has its own talisman switch, src/hurricane_hint.c -- user 2026-11-23)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/responsive.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/fiber_delete.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/kitetsu_levels.c

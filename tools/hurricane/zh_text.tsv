@@ -275,3 +275,10 @@ cat	Controls	按键	P
 	Bloom	泛光	E
 	Reduced	减弱	E
 	Original: the console's. Corrected: the same bloom, steady and even at any resolution. Off: none.	原版：与主机相同。修正：同样的泛光，在任何分辨率下都稳定一致。关：不显示	E
+# --- 0.9.75-0.9.82 (cheats question, All Weapons levels, Bloom, Positional Audio)
+	Do you want to use cheats?	要使用作弊吗？	P
+	Level 1	1级	E
+	Max Level	最高等级	E
+	Every weapon, at Level 1 or at its highest level, with its ammunition. Turned off, they are taken back.	全部武器，1级或最高等级，附带弹药。关闭后收回	E
+	The game's glow around bright things, steady and even at any resolution.	游戏中亮处周围的泛光，在任何分辨率下都稳定一致	E
+	Sounds placed around you. Console: as on the Xbox. Mixed: easier to place. Clear: by level only.	把声音分到四周。主机原版：与Xbox相同。混合：更容易分辨方位。清晰：只按音量	E

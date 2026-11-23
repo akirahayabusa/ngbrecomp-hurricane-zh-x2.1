@@ -107,8 +107,8 @@ void ngb_cheat_set(int which, int on)
                                                 "all armlets", "all technique scrolls", "one hit kill" };
     if (which < 0 || which >= N_CHEATS)
         return;
-    s_cheat[which] = !!on;
-    fprintf(stderr, "[CHEAT] %s %s\n", name[which], on ? "on" : "off");
+    s_cheat[which] = which == 6 ? (on < 0 ? 0 : on > 2 ? 2 : on) : !!on;   /* All Weapons: 1 Level 1, 2 Max Level */
+    fprintf(stderr, "[CHEAT] %s %s\n", name[which], !s_cheat[which] ? "off" : which == 6 ? (s_cheat[6] == 1 ? "level 1" : "max level") : "on");
 }
 
 /* A cheat changed the game's state: its checksums taken anew, not compared (see above). */
@@ -155,12 +155,16 @@ static void item_count_change(void);
 
 static void weapons_seen(uint16_t item, int change);
 static void scroll_given(uint16_t item, int change);
+static uint16_t weapon_held_again(uint16_t item);
+static uint32_t inventory_slot(uint16_t item);
+static uint8_t s_mark;
+static int s_weapons_level;   /* the level the record's weapons were given at (weapons_tick) */
 
 void sub_00154300(void)
 {
     uint16_t item = (uint16_t)eax;
     if (ENV_ONCE("NGB_ITEM_LOG"))                     /* NGB_ITEM_LOG=1: every change of an item's count */
-        fprintf(stderr, "[ITEM] %03X %+d\n", (unsigned)item, (int)ebx);
+        fprintf(stderr, "[ITEM] %03X %+d (from %08X)\n", (unsigned)item, (int)ebx, (unsigned)MEM32(esp));
     if ((s_cheat[4] || s_cheat[5]) && (int32_t)ebx < 0 && item_kept(item)) {
         uint32_t keep = ebx;
         if (getenv("NGB_CHEAT_LOG"))
@@ -172,6 +176,25 @@ void sub_00154300(void)
         return;
     }
     int change = (int32_t)ebx;
+    uint16_t held = change > 0 ? weapon_held_again(item) : 0xFFFF;
+    if (held != 0xFFFF) {
+        if (getenv("NGB_CHEAT_LOG"))
+            fprintf(stderr, "[CHEAT] all weapons: %03X picked up, %03X held: kept as it is\n", (unsigned)item, held);
+        uint32_t keep = ebx;
+        eax = held;
+        ebx = 0;
+        item_count_change();
+        ebx = keep;
+        weapons_seen(item, change);
+        /* found now: the cheat's one is the player's (its mark off, so turning the cheat off leaves it and the levels
+         * Muramasa raised it to since, as scroll_given does for a scroll) */
+        uint32_t slot = inventory_slot(held);
+        if (slot && MEM8(slot + 3) == s_mark && s_weapons_level == 1) {   /* (not one Max Level gave, still to go back) */
+            MEM8(slot + 3) = 0;
+            cheat_wrote();
+        }
+        return;
+    }
     item_count_change();
     weapons_seen(item, change);
     scroll_given(item, change);
@@ -880,8 +903,10 @@ static void scarab_tick(void)
  * (as scarab_tick does) or raised to it, with a full stack of what it fires when none is held. A
  * weapon's count is its level (+0x1E of its descriptor added); Lunar and Kitetsu are one item a level
  * (0x12B, 0x133, 0x134 and 0x182, 0x0CC, 0x183), so a lower one held becomes the top one, and one picked
- * up as usual with the cheat on goes into it. The original's Bow (0x08D) and Plasma Saber (0x0CE) are
- * left out: Black has the Strongbow and the Mk.II. A stack (incendiary shuriken, smoke bombs, what the
+ * up as usual with the cheat on goes into it. The Plasma Saber (0x0CE), otherwise Ninja of the Future's alone, is
+ * given in any costume (#268). Level 1 gives the first of a line where Max Level gives its last: the Wooden Sword
+ * (0x0CB) for the Unlabored Flawlessness, the original's Bow (0x08D) for the Strongbow, neither when the player holds
+ * the later one (level: the one level an item is given at; over: that later one). A stack (incendiary shuriken, smoke bombs, what the
  * bows and the spear gun fire) is given once, not again when used up: Infinite Projectiles is the cheat
  * for that.
  *
@@ -907,7 +932,7 @@ static void scarab_tick(void)
  * pickup (its script's give, sub_002D4590, checks nothing held first), so one found with the cheat on is the
  * player's and stays. A worn armlet taken back is taken off too (+4 of the player's block, 0xFFFF none). The
  * Intercept scroll (0x13C) is left out: Black never gives it. */
-static const struct { uint16_t item; uint8_t count, stack; uint16_t also[2]; uint8_t group; } s_weapons[] = {
+static const struct { uint16_t item; uint8_t count, stack; uint16_t also[2]; uint8_t group, level; uint16_t over; } s_weapons[] = {
     { 0x001, 3 },                           /* Dragon Sword */
     { 0x0C9, 1 },                           /* True Dragon Sword */
     { 0x026, 1 },                           /* Nunchaku */
@@ -916,8 +941,10 @@ static const struct { uint16_t item; uint8_t count, stack; uint16_t also[2]; uin
     { 0x095, 3 },                           /* Dabilahro */
     { 0x0CA, 2 },                           /* Vigoorian Flail */
     { 0x183, 1, 0, { 0x182, 0x0CC } },      /* Kitetsu */
-    { 0x0E1, 1 },                           /* Unlabored Flawlessness */
+    { 0x0E1, 1, 0, { 0 }, 0, 2 },           /* Unlabored Flawlessness (Max Level) */
+    { 0x0CB, 1, 0, { 0 }, 0, 1, 0x0E1 },    /* Wooden Sword (Level 1) */
     { 0x0CD, 1 },                           /* Dark Dragon Blade */
+    { 0x0CE, 3 },                           /* Plasma Saber */
     { 0x0F7, 1 },                           /* Plasma Saber Mk.II */
     { 0x098, 1 },                           /* Spear Gun */
     { 0x099, 0, 1 },                        /* spears */
@@ -925,7 +952,8 @@ static const struct { uint16_t item; uint8_t count, stack; uint16_t also[2]; uin
     { 0x030, 1 },                           /* Windmill Shuriken */
     { 0x008, 0, 1 },                        /* Incendiary Shuriken */
     { 0x165, 0, 1 },                        /* Smoke Bomb */
-    { 0x0F8, 1 },                           /* Strongbow */
+    { 0x0F8, 1, 0, { 0 }, 0, 2 },           /* Strongbow (Max Level) */
+    { 0x08D, 1, 0, { 0 }, 0, 1, 0x0F8 },    /* Bow (Level 1) */
     { 0x08E, 0, 1 },                        /* arrows */
     { 0x0E2, 1 },                           /* the bow with explosive arrows */
     { 0x0E3, 0, 1 },                        /* explosive arrows */
@@ -1035,6 +1063,24 @@ static void weapons_seen(uint16_t item, int change)
         if (!family_slot(i))
             s_had[i].wrote = 0;                        /* nothing of the cheat's left to look for */
     }
+}
+
+/* All Weapons Level 1 (#268): a weapon picked up, or given by the story or Muramasa's scarabs, while one of it is held
+ * already: the held one, else 0xFFFF. The game would add the new one to it -- a level more (the count is the level),
+ * a second Lunar that Muramasa's upgrade then leaves at level 1, a second Kitetsu -- where without the cheat the
+ * weapon is found before it is ever held. Muramasa's upgrades never come here (sub_00155810 raises the slot itself). */
+static uint16_t weapon_held_again(uint16_t item)
+{
+    if (s_cheat[6] != 1)
+        return 0xFFFF;
+    for (size_t i = 0; i < N_WEAPONS; i++) {
+        if (s_weapons[i].group || s_weapons[i].stack || !is_family(i, item))
+            continue;
+        uint32_t slot = family_slot(i);
+        if (slot && item_level(MEM16(slot)) >= item_level(item))
+            return MEM16(slot);                        /* (a higher one than held goes in as the game gives it) */
+    }
+    return 0xFFFF;
 }
 
 /* the cheat's items whose cheat is off, each back to what the player had (one in Ryu's hands left for later) */
@@ -1155,10 +1201,89 @@ static void scrolls_carry(void)
     }
 }
 
+/* Not before the player starts playing (#268): the attract demo is play too, Ryu with health, and the cheat put
+ * everything in the demo's bag -- its record (and the ammunition, given once) went on into the New Game after it, which
+ * then had no incendiary shuriken nor smoke bombs and the arrows at 0. Idle from the start and whenever the main menu
+ * shows; a fresh record when New Game, Load Game or Missions is chosen (src/main_menu.c), from the first area start
+ * after it (sub_002EC9A0, src/costume_menu.c): a New Game makes its bag anew before that, and a record begun earlier
+ * (on a fast PC, 3 s after the menu, still in the bag the demo left) had its ammunition wiped with it, given once. */
+static int s_weapons_idle = 1, s_weapons_fresh, s_area_started;
+static uint64_t s_chosen_ms, s_menu_ms;
+static uint64_t mono_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+void ngb_cheats_menu_shown(void)
+{
+    s_menu_ms = mono_ms();
+    if (!s_chosen_ms || mono_ms() - s_chosen_ms > 10000)   /* (not the menu fading out after the choice) */
+        s_weapons_idle = 1;
+}
+void ngb_cheats_play_chosen(void)
+{
+    s_weapons_idle = 0;
+    s_weapons_fresh = 1;
+    s_area_started = 0;
+    s_chosen_ms = mono_ms();
+}
+
+/* Lunar and Kitetsu, one item a level, as All Weapons Level 1 left them before 0.9.82 (#268): a Lunar picked up beside
+ * the cheat's became two in its slot (its items allow 3), and Muramasa's upgrade (sub_00155810) only moves a slot
+ * holding one to the next level -- it took the money and left it; a Kitetsu picked up beside a higher one took a slot
+ * of its own. Mended at each area start, as the game alone never makes either: one of each, the highest level kept.
+ * A lower one in Ryu's hands waits for an area start where it is not. */
+static void lunar_kitetsu_mend(void)
+{
+    static const uint16_t line[2][3] = { { 0x12B, 0x133, 0x134 }, { 0x182, 0x0CC, 0x183 } };
+    for (int w = 0; w < 2; w++) {
+        uint32_t top = 0;
+        int top_k = -1;
+        for (int k = 2; k >= 0 && !top; k--)
+            if ((top = inventory_slot(line[w][k])))
+                top_k = k;
+        if (!top)
+            continue;
+        if (MEM8(top + 2) > 1) {
+            fprintf(stderr, "[CHEAT] %03X x%u in one slot: one\n", MEM16(top), MEM8(top + 2));
+            MEM8(top + 2) = 1;
+            cheat_wrote();                             /* (the bag's checksum taken anew) */
+        }
+        for (int k = 0; k < top_k; k++) {
+            uint32_t low = inventory_slot(line[w][k]);
+            /* in his hands: the saved game's copy as an area starts (0x5895BA, before Ryu is made), and Ryu's own when
+             * he is there already (as rename_item in src/costume_menu.c) */
+            if (!low || MEM16(0x5895BA) == line[w][k] ||
+                (MEM8(0x4B7640) < 0x20 && MEM16(0x58A570 + MEM8(0x4B7640) * 0x210u) == line[w][k]))
+                continue;
+            fprintf(stderr, "[CHEAT] %03X beside %03X: taken out\n", MEM16(low), MEM16(top));
+            MEM8(low + 2) = 0;
+            MEM8(low + 3) = 0;
+            MEM16(low) = 0xFFFF;
+            cheat_wrote();
+        }
+    }
+}
+
+void ngb_cheats_area_started(void)   /* src/costume_menu.c: each area start (sub_002EC9A0) */
+{
+    s_area_started = 1;
+    lunar_kitetsu_mend();
+}
+
 static void weapons_tick(void)
 {
-    if (!MEM16(0x58A564))
+    if (!MEM16(0x58A564) || s_weapons_idle)
         return;
+    /* (the record starts once the menu is gone -- its fade-out, and the bag of the game before still in memory -- a
+     * fresh one, after the choice) */
+    if (s_weapons_fresh) {
+        if (!s_area_started || mono_ms() - s_menu_ms < 3000)
+            return;
+        memset(s_had, 0, sizeof s_had);
+        s_weapons_fresh = 0;
+    }
     int wrote = 0, marked = 0, seen = 0;
     for (size_t i = 0; i < N_WEAPONS; i++)
         wrote |= s_had[i].wrote, seen |= s_had[i].seen;
@@ -1177,6 +1302,23 @@ static void weapons_tick(void)
     }
     if (MEM8(0xDB9AD5))                                /* under the pause menu: its lists stay true */
         return;
+    /* Level 1 and Max Level one for the other (or through Off, as the pause tab's cycle goes): what the level before gave
+     * back first -- a weapon in Ryu's hands when he holds another -- and nothing of the new level given meanwhile, so
+     * none is doubled. s_weapons_level: the level the record's weapons were given at. */
+    if (s_weapons_level && s_cheat[6] != s_weapons_level) {
+        int keep = s_cheat[6], left = 0;
+        s_cheat[6] = 0;
+        weapons_restore();
+        s_cheat[6] = keep;
+        for (size_t i = 0; i < N_WEAPONS; i++)
+            left |= s_weapons[i].group == 0 && s_had[i].seen;
+        if (left && keep)
+            return;                                    /* (the rest when he holds another) */
+        if (!left)
+            s_weapons_level = 0;                       /* (Off with one still in his hands: kept until it is back) */
+    }
+    if (s_cheat[6])
+        s_weapons_level = s_cheat[6];
     if (!seen && (s_cheat[6] || s_cheat[7] || s_cheat[8])) {   /* a new record, a new mark (before
                                                                   * scrolls_left_over adopts with it) */
         static unsigned n;
@@ -1192,7 +1334,10 @@ static void weapons_tick(void)
         uint32_t slot = family_slot(i);
         if (!s_cheat[6 + s_weapons[i].group])
             continue;
-        if (!s_had[i].seen) {
+        if (s_weapons[i].group == 0 && s_weapons[i].level && s_weapons[i].level != s_cheat[6])
+            continue;                                  /* (the other level's) */
+        int first = !s_had[i].seen;
+        if (first) {
             if (slot && equipped(MEM16(slot)) && MEM16(slot) != item)
                 continue;                              /* a lower one in his hands: when he holds another */
             s_had[i].seen = 1;
@@ -1203,12 +1348,42 @@ static void weapons_tick(void)
         } else if (s_weapons[i].stack) {
             continue;                                  /* given once */
         }
+        /* Level 1 (#268): a weapon not held at all, at its first level -- the lowest of Lunar's and Kitetsu's items, the
+         * others' count 1; one held stays as it is, a higher one too (the player's or found). Ammunition as at Max Level. */
+        if (s_weapons[i].group == 0 && s_cheat[6] == 1 && !s_weapons[i].stack) {
+            /* Given once, when the record first sees it: one the game takes away later stays gone -- the Bow while the
+             * Strongbow's pickup replaces it, which the cheat gave back in between (#268) */
+            if (!first || family_slot(i) || (s_weapons[i].over && inventory_slot(s_weapons[i].over)))
+                continue;
+            uint16_t give = item;
+            for (int k = 0; k < 2 && s_weapons[i].also[k]; k++)
+                if (item_record(s_weapons[i].also[k]) && item_level(s_weapons[i].also[k]) < item_level(give))
+                    give = s_weapons[i].also[k];
+            if (!item_record(give)) {
+                s_had[i].seen = 0;                     /* (tried again) */
+                continue;
+            }
+            uint32_t to = 0;
+            for (uint32_t a = 0x5891D0; !to && a < 0x5891D0 + 4 * 0x80; a += 4)
+                if (!MEM8(a + 2) || MEM16(a) == 0xFFFF)
+                    to = a;
+            if (!to) {
+                s_had[i].seen = 0;                     /* the bag is full: tried again */
+                continue;
+            }
+            MEM16(to) = give;
+            MEM8(to + 2) = 1;
+            weapons_mark(i, to);
+            weapons_log("given", give, 1);
+            continue;
+        }
         /* a lower one picked up beside the top one (weapons_seen has it as the player's): into it */
         for (int k = 0; k < 2 && s_weapons[i].also[k]; k++) {
             uint32_t lower = inventory_slot(s_weapons[i].also[k]);
             if (!lower || equipped(s_weapons[i].also[k]))
                 continue;
-            if (s_had[i].seen && (!s_had[i].count || item_level(MEM16(lower)) > item_level(s_had[i].item)))
+            if (s_had[i].seen && MEM8(lower + 3) != s_mark &&   /* (not one of the cheat's own) */
+                (!s_had[i].count || item_level(MEM16(lower)) > item_level(s_had[i].item)))
                 s_had[i].item = MEM16(lower), s_had[i].count = MEM8(lower + 2);
             uint32_t top = inventory_slot(item);
             if (top) {
@@ -1275,7 +1450,7 @@ static void cheat_tick(void)
     if (!env_read) {                                   /* NGB_CHEATS=111: debugging, on at start */
         const char *e = getenv("NGB_CHEATS");
         for (int i = 0; e && i < N_CHEATS && e[i]; i++)
-            s_cheat[i] = e[i] == '1';
+            s_cheat[i] = e[i] == '1' || (i == 6 && e[i] == '2') ? e[i] - '0' : 0;   /* (All Weapons: 2 Max Level) */
         env_read = 1;
     }
     if (health_fill()) {                               /* Infinite Health */
@@ -1335,8 +1510,10 @@ static void pos_tick(void)
     int ok = fscanf(f, "%f %f %f", &x, &y, &z) == 3;
     fclose(f);
     remove(tp);
-    if (!ok)
+    if (!ok) {   /* anything else ("?"): only where he is */
+        fprintf(stderr, "[POS] at %.3f %.3f %.3f\n", MEMF(0x4B5710), MEMF(0x4B5714), MEMF(0x4B5718));
         return;
+    }
     float ox = MEMF(0x4B5710), oy = MEMF(0x4B5714), oz = MEMF(0x4B5718);
     int n = 0;
     for (uint32_t a = 0x4B5000; a < 0x4B8000; a += 16)
@@ -1355,6 +1532,7 @@ void ngb_frame_tick(void)
 {
     ngb_zh_font_tick();
     { extern void ngb_menu_frame(void); ngb_menu_frame(); }   /* src/menu_mouse.c: the frames, for the controls */
+    { extern void ngb_tab_game_frame(void); ngb_tab_game_frame(); }   /* src/ingame_menu.c: the pause tab's page (#261) */
     { extern void ngb_camera_frame(void); ngb_camera_frame(); }   /* src/camera.c: which view the stick turns */
     { extern void ngb_quick_tick(void); ngb_quick_tick(); }
     { extern void ngb_render_list_frame(void); ngb_render_list_frame(); }   /* src/render_list.c: its nodes back */

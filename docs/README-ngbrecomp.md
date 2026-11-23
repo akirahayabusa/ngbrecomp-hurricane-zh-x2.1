@@ -43,7 +43,7 @@ release** (NTSC-U, title ID `5443000D`) and checks for it.
 - Android (arm64), **experimental**, with Xbox 360 touch controls
 - Render resolution up to 10x, anisotropic filtering, MSAA, sharper shadows
 - 16:9, 16:10, 21:9 and 32:9 as well as 4:3: the 3D fills the screen, the HUD goes to the screen's
-  corners, optional HUD-free view, menus keep the game's own 16:19
+  corners, optional HUD-free view, menus keep the game's own 16:9
 - Keyboard and mouse with key prompts in the game, Xbox, PlayStation and Nintendo button prompts,
   rebindable controls for keyboard, mouse and controller (Ninpo and Wind Run on any two buttons),
   mouse support in the menus
@@ -56,6 +56,7 @@ release** (NTSC-U, title ID `5443000D`) and checks for it.
 - Sound mixed on the PC: positional 3D sound, the console's room reverb, and 5.1 surround on a 5.1 or
   7.1 output
 - Smooth frame pacing and low input latency; shaders prepared in the background
+- Frame Interpolation (experimental): higher frame rates while the game logic stays at 60 Hz
 
 ## Getting started
 
@@ -150,6 +151,11 @@ packages are signed ad hoc, without Developer ID signing or notarization.
 **Text language:** the game's text follows the system's language, Japanese on a Japanese system and English
 otherwise (the disc has only these two). `text_language = japanese` or `english` in `settings.ini` overrides it.
 
+**Options (`env.txt`):** a text file named `env.txt` beside the saves (the first row above), or next to the
+program, with one option a line (`NAME=value`), for the options that have no menu, like `NV2A_TEX_DUMP` for
+texture packs. Each one can also be set in the environment, which wins (and the one beside the saves wins over the
+one next to the program). The log says which files were read.
+
 **Portable mode:** with a file named `portable.txt` next to `NinjaGaidenBlack.exe` (or the AppImage or Mac app),
 all of these go into a `userdata` folder next to it instead. The first-run setup offers this as a
 checkbox. The folder must be writable, so not inside Program Files. Delete `portable.txt` to go back.
@@ -176,18 +182,19 @@ of the pause menu. Changes apply at once and are saved.
 </table>
 
 - **Graphics**: render resolution (1x–10x), texture filtering (the console's, or 2x–16x
-  anisotropic), anti-aliasing (MSAA), shadow resolution, Bloom (Original, the console's; Corrected, the
-  same bloom kept steady and even at any render resolution; Off), Lower Detail Under Load, Multithreaded Renderer (drawing on a
+  anisotropic), anti-aliasing (MSAA), shadow resolution, Bloom (On, steady and even at any render
+  resolution; Off), Lower Detail Under Load, Multithreaded Renderer (drawing on a
   thread of its own, for slower CPUs; on by default on Android, off unless chosen on a PC), Frame
   Interpolation (experimental: pictures made between the game's 60 frames a second, for displays of 120 Hz
   and up; Full Rate, Half Rate or 2x)
-- **Display**: aspect ratio (4:3, 16:9, 16:10, 21:9, 32:9), window size, windowed / fullscreen /
-  borderless, V-Sync (Off, Mailbox, FIFO, Adaptive), frame-rate counter, the HUD on or off, HUD Style
-  (Normal, or Compact: smaller and closer to the corners), HUD Aspect (Stretched like the game's widescreen
-  mode, or Corrected: the HUD in its own 4:3 shape on a wide screen), skip the warnings and intro movies
-- **Sound**: Positional Audio (3D sounds placed left and right: Mixed, the default, half the sound chip's
-  filters and half panned by direction, the easiest to place; Clear, by level only; Console, through the sound
-  chip's filters as on the Xbox, duller; Off, centred), Audio Output (Auto, Stereo
+- **Display**: aspect ratio (4:3, 16:9, 16:10, 21:9 which also fits phones from 18:9, 32:9), window size,
+  windowed / fullscreen / borderless, V-Sync (Off, Mailbox, FIFO, Adaptive), frame-rate counter, the HUD on
+  or off, HUD Style (Normal, or Compact: smaller and closer to the corners), HUD Aspect (Stretched like the
+  game's widescreen mode, or Corrected: the HUD in the shape it was drawn, where Stretched puts it), skip the
+  warnings and intro movies
+- **Sound**: Positional Audio (3D sounds placed left and right: Console, the default, through the sound
+  chip's filters and its speaker crosstalk, as on the Xbox; Mixed, half the filters and half panned by direction;
+  Clear, by level only; Off, centred), Audio Output (Auto, Stereo
   or 5.1; Auto is 5.1 on a 5.1 or 7.1 output; a change needs a restart of the game)
 - **Gameplay** (each off unless chosen): the Quick Menu, an NG2-style d-pad menu for weapons, Ninpo
   and items, and whether the game pauses while it is open; **Intercept** (Black or Hurricane), the Hurricane
@@ -196,12 +203,14 @@ of the pause menu. Changes apply at once and are saved.
   Cutscene**, Start skipping movies and in-game cutscenes not yet watched (#139); **Responsive Menus**, Start
   taken at once at the title, in a cutscene's opening wait and in the pause menu after equipping, where the game
   ignores it for a while (#116); **Bow Crosshair**, a dot where the arrow will land while aiming a bow in first
-  person, the game's own glow from an arrow's head (#228)
-- **Cheats** (for the session only): infinite health, ninpo, essence, items, projectiles; golden scarabs; one
+  person, the game's own glow from an arrow's head (#228). The Talisman of Rebirth is equipped or unequipped on the
+  pause menu's Item page (unequipped, Ryu dies and keeps his talismans)
+- **Cheats** (for the session only; locked until "Do you want to use cheats?" is answered Yes in RECOMP SETTINGS,
+  and only then in the pause menu): infinite health, ninpo, essence, items, projectiles; golden scarabs; one
   hit kill (any hit that hurts an enemy or a boss kills it).
   Its **Unlocks** page: all difficulties from the start, all costumes, and the main menu's Missions (with every
   mission), Arcade Ninja Gaiden and Movie Theater without earning them (saved); All Weapons (every melee and
-  projectile weapon at its highest level), All Armlets (the armlets and bands) and All Scrolls (the Izuna Drop,
+  projectile weapon at Level 1 or at its highest level, the Plasma Saber in any costume), All Armlets (the armlets and bands) and All Scrolls (the Izuna Drop,
   Counter Attack and Guillotine Throw technique scrolls; the story's own can still be picked up while it is on),
   for the session: turned off, each takes back what it gave and puts back your own pickups; a save made while one
   is on keeps what it gave

@@ -33,9 +33,10 @@ typedef struct NgbSettings {
     int frame_interp;       /* Graphics > Frame Interpolation (src/d3d/gpu/threaded.cpp, #226): 0 off, 1 Full Rate, 2 Half Rate, 3 2x */
     int text_language;      /* settings.ini text_language (no menu, #236): 0 auto (the system's language), 1 English, 2 Japanese */
     int bow_crosshair;      /* Gameplay > Bow Crosshair: a dot in the middle while aiming a bow in first person (src/camera.c, #228) */
+    int cheats_unlocked;    /* the Cheats asked for once ("Use cheats?" Yes): until then they stay locked (src/pause_tab.c) */
     int hud_aspect;         /* Display > HUD Aspect: 0 stretched as the game's widescreen mode draws it, 1 its own shape (the renderer narrows only the HUD's elements: src/d3d/vk/backend.cpp, #220 #219) */
     int audio_output;       /* 0 auto (5.1 on a 5.1 or 7.1 device), 1 stereo, 2 5.1 (src/audio/dsound_hle.cpp) */
-    int smooth_glow;        /* Bloom: 0 Original, 2 Corrected (#248), 3 Off (src/d3d/vk/glow_options.h; 1, Reduced, by NGB_BLOOM only) */
+    int smooth_glow;        /* Bloom: 2 On (#248, #270), 3 Off (src/d3d/vk/glow_options.h; 0 Original and 1 Reduced by NGB_BLOOM only) */
     int detail_under_load;  /* the game's own detail lowering when the GPU looks busy (src/d3d/d3d.c, #50, #114) */
     int render_thread;      /* Multithreaded Renderer: drawing on a thread of its own (src/d3d/gpu/threaded.cpp) */
     int essence_charging;   /* Gameplay > Essence-Only Charging (src/ut_charge.c, #120) */

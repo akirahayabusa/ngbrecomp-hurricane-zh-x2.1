@@ -1,7 +1,7 @@
-// RECOMP SETTINGS -> Graphics -> Bloom (ngb_pc_setting 18): 0 Original (the game's passes as they are), 2 Corrected
-// (the game's passes, fed and finished at the console's size: steady at any render scale, #248), 3 Off (the glow not
-// added). 1, Reduced (the continuous chain below, fainter: #64), is no longer offered: NGB_BLOOM=0..3 overrides the
-// setting, and NGB_GLOW_QUALITY=1 or 0 as before (Reduced or Original), for comparing.
+// RECOMP SETTINGS -> Graphics -> Bloom (ngb_pc_setting 18): 2 On (the game's passes, fed and finished at the console's
+// size: steady at any render scale, #248; the default, #270), 3 Off (the glow not added). 0 Original (the game's passes
+// as they are) and 1 Reduced (the continuous chain below, fainter: #64) are no longer offered: NGB_BLOOM=0..3 overrides
+// the setting, and NGB_GLOW_QUALITY=1 or 0 as before (Reduced or Original), for comparing.
 inline int GlowMode() {
     static int forced=[] {
         const char* e=std::getenv("NGB_BLOOM");
@@ -69,7 +69,7 @@ inline GlowFootprintValues GlowFootprint() {
     switch (ngb_pc_setting(7)) {
     case 1: result.aspect=16.0/9.0;break;
     case 2: result.aspect=16.0/10.0;break;
-    case 3: result.aspect=64.0/27.0;break;
+    case 3: result.aspect=ngb_aspect_21_9();break;
     case 4: result.aspect=32.0/9.0;break;
     default: break;
     }

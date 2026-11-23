@@ -897,7 +897,7 @@ static void *guest_main(void *unused)
         extern void ngb_audio_set_positional(int mode);
         extern void ngb_audio_set_output(int choice);
         extern void dsound_hle_set_hrtf_tables(uint32_t index, uint32_t filters);
-        ngb_audio_set_positional(ngb_pc_setting(23));   /* Positional Audio (#30, #86): Mixed unless chosen otherwise */
+        ngb_audio_set_positional(ngb_pc_setting(23));   /* Positional Audio (#30, #86): Console unless chosen otherwise */
         ngb_audio_set_output(ngb_pc_setting(25));       /* Audio Output: auto unless chosen */
         dsound_hle_set_hrtf_tables(0x395430, 0x383E70); /* DirectSound's full HRTF tables in this build */
     }
@@ -1115,9 +1115,58 @@ static void portable_init(void)
     }
 }
 
+/* env.txt: options (NAME=value a line, # a comment) set as from the environment, on a PC as on Android -- in the
+ * save folder (where log.txt is) or next to the program; what the environment itself sets wins. The issues' advice
+ * ("NV2A_TEX_DUMP in env.txt") had nowhere to go on Windows. */
+static char s_env_read[8400];
+static void env_file(const char *dir)
+{
+    char path[4200], line[4096];
+    snprintf(path, sizeof path, "%s/env.txt", dir);
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return;
+    for (int first = 1; fgets(line, sizeof line, f); first = 0) {
+        line[strcspn(line, "\r\n")] = 0;
+        char *name = line;
+        if (first && !memcmp(name, "\xEF\xBB\xBF", 3))
+            name += 3;                                 /* (Notepad's UTF-8 mark) */
+        while (*name == ' ' || *name == '\t')
+            name++;
+        char *eq = strchr(name, '=');
+        if (name[0] == '#' || !eq || eq == name)
+            continue;
+        *eq = 0;
+        for (char *e = eq - 1; e > name && (*e == ' ' || *e == '\t'); e--)
+            *e = 0;
+        char *val = eq + 1;                            /* (spaces around it, and quotes, left out) */
+        while (*val == ' ' || *val == '\t')
+            val++;
+        size_t n = strlen(val);
+        while (n && (val[n - 1] == ' ' || val[n - 1] == '\t'))
+            val[--n] = 0;
+        if (n >= 2 && ((val[0] == '"' && val[n - 1] == '"') || (val[0] == '\'' && val[n - 1] == '\''))) {
+            val[n - 1] = 0;
+            val++;
+        }
+        if (*val && !getenv(name))                     /* (an empty value: as if not there) */
+            setenv(name, val, 1);
+    }
+    fclose(f);
+    size_t used = strlen(s_env_read);                  /* (said in the log once it is open; the first read wins) */
+    snprintf(s_env_read + used, sizeof s_env_read - used, "%s%s", used ? ", then " : "", path);
+}
+
 int main(int argc, char **argv)
 {
     portable_init();   /* before anything picks a folder (the log's, first) */
+    {   /* (before the log, so its options take: NGB_HANG_DUMP and the rest) */
+        char dir[4096];
+        save_dir_path(dir, sizeof dir);
+        env_file(dir);
+        if (ngb_portable_base(dir, sizeof dir))
+            env_file(dir);
+    }
 #if !defined(_WIN32) && !defined(__ANDROID__)   /* (Android: src/android_main.c sends it to log.txt and logcat) */
     /* No terminal and no file of the player's own (the Mac's Finder, Steam on Linux -- a Steam Deck in Game
      * Mode): the output to log.txt in the save folder, as on Windows, or a start that fails there leaves
@@ -1157,12 +1206,16 @@ int main(int argc, char **argv)
             freopen(log, "a", stderr);
         }
     }
+    if (s_env_read[0])
+        fprintf(stderr, "env.txt read: %s\n", s_env_read);
     if (getenv("NGB_MEM_TRACE"))
         CloseHandle(CreateThread(NULL, 0, mem_trace_thread, NULL, 0, NULL));
     if (getenv("NGB_HANG_DUMP"))
         CloseHandle(CreateThread(NULL, 0, hang_dump_thread,
                                  (LPVOID)(uintptr_t)atoi(getenv("NGB_HANG_DUMP")), 0, NULL));
 #else
+    if (s_env_read[0])
+        fprintf(stderr, "env.txt read: %s\n", s_env_read);
     /* NGB_PTRACE_ANY=1: let any process of this user attach a debugger
      * (Yama's ptrace_scope 1 allows only ancestors), for stack dumps. */
 #ifdef __linux__

@@ -145,9 +145,10 @@ void ngb_settings_load(NgbSettings *s)
     s->msaa = 1;
     s->shadow_scale = 1;   /* the console's (Original): 0.9.45; 4x before */
     s->quick_menu_freeze = 1;
-    s->positional_audio = 3;  /* mixed: half the filters, half a pan by direction -- easiest to place (#126); clear
-                               * (2) was the default from 0.9.40 to 0.9.51 */
+    s->positional_audio = 1;  /* console: the sound chip's filters and crosstalk, as a console sounds (#270); mixed (3)
+                               * was the default from 0.9.52 to 0.9.80, clear (2) from 0.9.40 to 0.9.51 */
     s->show_hud = 1;
+    s->smooth_glow = 2;   /* Bloom On (#270): the game's bloom, steady at any render scale */
     s->talisman = 1;
     s->quick_menu_scale = 0;    /* the quick menu off unless chosen (Gameplay) */
     s->skip_intro = 0;
@@ -159,7 +160,7 @@ void ngb_settings_load(NgbSettings *s)
     if (!f)
         return;
     s->width = s->height = 0;
-    int defaults = 0;   /* the defaults the file was written under (0: before 0.9.40, 3: 0.9.40, 4: 0.9.44, 5: 0.9.52) */
+    int defaults = 0;   /* the defaults the file was written under (0: before 0.9.40, 3: 0.9.40, 4: 0.9.44, 5: 0.9.52, 6: 0.9.81) */
     while (fgets(line, sizeof line, f)) {
         char key[64], val[128];
         if (sscanf(line, " %63[^= ] = %127[^\r\n]", key, val) != 2)
@@ -216,14 +217,16 @@ void ngb_settings_load(NgbSettings *s)
             s->bow_crosshair = atoi(val) != 0;
         } else if (!strcmp(key, "hud_aspect")) {
             s->hud_aspect = atoi(val) != 0;
+        } else if (!strcmp(key, "cheats_unlocked")) {
+            s->cheats_unlocked = atoi(val) != 0;
         } else if (!strcmp(key, "show_hud")) {
             s->show_hud = atoi(val) != 0;
         } else if (!strcmp(key, "positional_audio")) {
             s->positional_audio = atoi(val) < 0 ? 0 : atoi(val) > 3 ? 3 : atoi(val);   /* 0 off, 1 console, 2 clear, 3 mixed */
-        } else if (!strcmp(key, "smoother_glow")) {   /* before 0.9.73: its softer glow on is Corrected now */
-            s->smooth_glow = atoi(val) != 0 ? 2 : 0;
-        } else if (!strcmp(key, "bloom")) {   /* 0 Original, 2 Corrected, 3 Off (1 was Reduced: Corrected now) */
-            s->smooth_glow = atoi(val) == 1 ? 2 : atoi(val) < 0 ? 0 : atoi(val) > 3 ? 3 : atoi(val);
+        } else if (!strcmp(key, "smoother_glow")) {   /* before 0.9.73: On either way now (#270) */
+            s->smooth_glow = 2;
+        } else if (!strcmp(key, "bloom")) {   /* 2 On, 3 Off; 0 Original and 1 Reduced are On now (#270) */
+            s->smooth_glow = atoi(val) == 3 ? 3 : 2;
         } else if (!strcmp(key, "detail_under_load")) {
             s->detail_under_load = atoi(val) != 0;
         } else if (!strcmp(key, "defaults")) {
@@ -265,6 +268,10 @@ void ngb_settings_load(NgbSettings *s)
      * once (a Clear chosen on purpose included: the file cannot tell, and it is one change back) */
     if (defaults < 5 && s->positional_audio == 2)
         s->positional_audio = 3;
+    /* 0.9.81 made Console the default for everyone (#270: it now matches a console's capture): every file from before
+     * gets it once, whatever it had */
+    if (defaults < 6)
+        s->positional_audio = 1;
     snap_size(s);
 }
 
@@ -280,7 +287,7 @@ void ngb_settings_save(const NgbSettings *s)
         return;
     }
     fprintf(f, "# Ninja Gaiden Black settings (the settings screen writes this file)\n");
-    fprintf(f, "defaults = 5\n");
+    fprintf(f, "defaults = 6\n");
     fprintf(f, "aspect = %s\n", ASPECT_NAMES[s->aspect]);
     fprintf(f, "window = %dx%d\n", s->width, s->height);
     fprintf(f, "fullscreen = %d\n", s->fullscreen);
@@ -296,7 +303,7 @@ void ngb_settings_save(const NgbSettings *s)
     fprintf(f, "unlock_movie_theater = %d\n", s->unlock[2]);
     fprintf(f, "movie_ratio = %s\n", s->movie_43 ? "4:3" : "16:9");
     fprintf(f, "shadow_resolution = %d\n", s->shadow_scale);
-    fprintf(f, "bloom = %d\n", s->smooth_glow);   /* 0 Original, 2 Corrected, 3 Off */
+    fprintf(f, "bloom = %d\n", s->smooth_glow);   /* 2 On, 3 Off */
     fprintf(f, "detail_under_load = %d\n", s->detail_under_load);
     fprintf(f, "render_thread = %d\n", s->render_thread);
     fprintf(f, "essence_only_charging = %d\n", s->essence_charging);
@@ -306,6 +313,7 @@ void ngb_settings_save(const NgbSettings *s)
     fprintf(f, "show_hud = %d\n", s->show_hud);
     fprintf(f, "hud_style = %d\n", s->hud_style);
     fprintf(f, "hud_aspect = %d\n", s->hud_aspect);
+    fprintf(f, "cheats_unlocked = %d\n", s->cheats_unlocked);
     fprintf(f, "talisman_of_rebirth = %d\n", s->talisman);
     fprintf(f, "bow_crosshair = %d\n", s->bow_crosshair);
     fprintf(f, "text_language = %s\n", s->text_language == 2 ? "japanese" : s->text_language == 1 ? "english" : "auto");
@@ -324,7 +332,7 @@ double ngb_settings_aspect_ratio(const NgbSettings *s)
     case ASPECT_4_3:   return 4.0 / 3.0;
     case ASPECT_16_10: return 16.0 / 10.0;
     case ASPECT_21_9: {
-        /* "21:9" is three shapes among displays: 64:27 (2560 x 1080), 43:18 (3440 x 1440) and 12:5 (3840 x 1600).
+        /* "21:9" is three shapes among monitors: 64:27 (2560 x 1080), 43:18 (3440 x 1440) and 12:5 (3840 x 1600).
          * The screen's own between them, as the window is or the display in fullscreen; 64:27 drew bars a few
          * dozen pixels wide at the sides of the other two (#233). */
         int w = s->width, h = s->height;
@@ -337,9 +345,10 @@ double ngb_settings_aspect_ratio(const NgbSettings *s)
             return 64.0 / 27.0;                    /* (the display's shape once the window is up) */
         }
 #endif
-        double r = h > 0 ? (double)w / h : 0, lo = 64.0 / 27.0, hi = 12.0 / 5.0;
+        /* Phones are wide too, 18:9 to 20:9 (2340 x 1080, 2400 x 1080): the screen's own from 2:1 (#262). */
+        double r = h > 0 ? (double)w / h : 0, lo = 2.0, hi = 12.0 / 5.0;
         if (r < lo * 0.995 || r > hi * 1.005)      /* (a little either side: sizes rounded by display scaling) */
-            return lo;
+            return 64.0 / 27.0;
         return r < lo ? lo : r > hi ? hi : r;
     }
     case ASPECT_32_9:  return 32.0 / 9.0;

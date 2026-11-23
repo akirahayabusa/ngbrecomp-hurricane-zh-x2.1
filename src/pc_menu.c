@@ -134,7 +134,8 @@ static const struct { const uint8_t *kinds; int n; } s_ours[N_OURS] = {
 #define T_INTERP   0x20208            /* Frame Interpolation (src/d3d/gpu/threaded.cpp, #226) */
 #define D_INTERP   0x20209
 #define T_INTERP0  0x2020A            /* + 0..3: Off, Full Rate, Half Rate, 2x */
-#define T_GLOW0    0x2020E            /* + 0..3: Bloom's Original, Reduced, Corrected, Off */
+#define T_GLOW0    0x2020E            /* + 0..3: Bloom's (Original, Reduced: no longer offered), On, Off */
+#define T_ALLWEAP0 0x20212            /* + 0..2: All Weapons' Off, Level 1, Max Level (#268) */
 #define T_AUDIOOUT 0x201CF            /* Audio Output: Auto, Stereo, 5.1 (src/audio) */
 #define D_AUDIOOUT 0x201D0
 #define T_AUTO     0x201D1
@@ -253,14 +254,15 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_INTERP, "Frame Interpolation" },
     { D_INTERP, "Experimental. Pictures between the game's frames, on a 120 Hz or faster display." },
     { T_INTERP0 + 0, "Off" }, { T_INTERP0 + 1, "Full Rate" }, { T_INTERP0 + 2, "Half Rate" }, { T_INTERP0 + 3, "2x" },
-    { T_GLOW0 + 0, "Original" }, { T_GLOW0 + 1, "Reduced" }, { T_GLOW0 + 2, "Corrected" }, { T_GLOW0 + 3, "Off" },
+    { T_ALLWEAP0 + 0, "Off" }, { T_ALLWEAP0 + 1, "Level 1" }, { T_ALLWEAP0 + 2, "Max Level" },
+    { T_GLOW0 + 0, "Original" }, { T_GLOW0 + 1, "Reduced" }, { T_GLOW0 + 2, "On" }, { T_GLOW0 + 3, "Off" },
     { D_HUD, "The health and Ninpo bar, weapons and the rest drawn over play. Off: a clear screen." },
     { T_AUDIOOUT, "Audio Output" },
     { D_AUDIOOUT, "Speakers. Auto: 5.1 when the output device has 5.1 or 7.1 channels, else stereo. Needs a restart of the game." },
     { T_AUTO, "Auto" },
     { T_STEREO, "Stereo" },
     { T_SURROUND, "5.1" },
-    { D_POSAUDIO, "Sounds placed left and right. Clear: by level only. Console: as the Xbox, duller. Mixed: between the two." },
+    { D_POSAUDIO, "Sounds placed around you. Console: as on the Xbox. Mixed: easier to place. Clear: by level only." },
     { T_QUICKSCALE, "Quick Menu" },
     { D_QUICKSCALE, "A d-pad menu of weapons, Ninpo and items (Up and Down open it), at this size." },
     { D_GAMEPLAY, "Optional changes to how the game plays, each off unless chosen: the Quick Menu." },
@@ -287,13 +289,13 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_MSAA,    "Anti-Aliasing (MSAA)" },
     { D_MSAA,    "Smooths the edges of the 3D; 2x to 8x samples a pixel." },
     { T_GLOW,    "Bloom" },
-    { D_GLOW,    "Original: the console's. Corrected: the same bloom, steady and even at any resolution. Off: none." },
+    { D_GLOW,    "The game's glow around bright things, steady and even at any resolution." },
     { T_LOADDETAIL, "Lower Detail Under Load" },
     { D_LOADDETAIL, "Eases off detail when busy, as on the Xbox; Ryu's shadow may flicker." },
     { T_RTHREAD, "Multithreaded Renderer" },
     { D_RTHREAD, "Drawing on a thread of its own, for slower CPUs. May have bugs. Needs restart." },
     { T_ALLWEAP, "All Weapons" },
-    { D_ALLWEAP, "Every weapon, at its highest level. Turned off, they are taken back." },
+    { D_ALLWEAP, "Every weapon, at Level 1 or at its highest level, with its ammunition. Turned off, they are taken back." },
     { T_ESSCHARGE, "Essence-Only Charging" },
     { D_ESSCHARGE, "Holding attack no longer charges an Ultimate Technique: only absorbing essence does." },
     { T_CUTSKIP, "Skip Any Cutscene" },
@@ -587,8 +589,11 @@ static int patch_constant(double a)
            patch_float(0x414AF4, wide && !game_widescreen_mode() ? (float)a : s_orig_43);
 }
 
+static double s_view_a;   /* the screen's shape the 3D is drawn for (sub_0003FA50) */
+
 void ngb_game_set_aspect_constant(double a)
 {
+    s_view_a = a;
     s_aspect_a = patch_constant(a) ? 0 : a;
 }
 
@@ -891,7 +896,7 @@ static uint32_t pc_value_id(int row, uint32_t movie_id)
     case ROW_RTHREAD: return ngb_pc_setting(30) ? T_ON : T_OFF;
     case ROW_INFITEMS: return ngb_pc_setting(21) ? T_ON : T_OFF;
     case ROW_INFAMMO: return ngb_pc_setting(22) ? T_ON : T_OFF;
-    case ROW_ALLWEAP: return ngb_pc_setting(32) ? T_ON : T_OFF;
+    case ROW_ALLWEAP: return T_ALLWEAP0 + (uint32_t)ngb_pc_setting(32);
     case ROW_ESSCHARGE: return ngb_pc_setting(33) ? T_ON : T_OFF;
     case ROW_CUTSKIP: return ngb_pc_setting(34) ? T_ON : T_OFF;
     case ROW_RESPONSIVE: return ngb_pc_setting(36) ? T_ON : T_OFF;
@@ -965,7 +970,7 @@ static int pc_value_change(int row, int delta)
     case ROW_RTHREAD: ngb_pc_set_setting(30, !ngb_pc_setting(30)); break;
     case ROW_INFITEMS: ngb_pc_set_setting(21, !ngb_pc_setting(21)); break;
     case ROW_INFAMMO: ngb_pc_set_setting(22, !ngb_pc_setting(22)); break;
-    case ROW_ALLWEAP: ngb_pc_set_setting(32, !ngb_pc_setting(32)); break;
+    case ROW_ALLWEAP: ngb_pc_set_setting(32, (ngb_pc_setting(32) + (step > 0 ? 1 : 2)) % 3); break;
     case ROW_ESSCHARGE: ngb_pc_set_setting(33, !ngb_pc_setting(33)); break;
     case ROW_CUTSKIP: ngb_pc_set_setting(34, !ngb_pc_setting(34)); break;
     case ROW_RESPONSIVE: ngb_pc_set_setting(36, !ngb_pc_setting(36)); break;
@@ -1025,9 +1030,28 @@ static void menu_sound(uint32_t which)
  * CC: cdecl, 0 params, returns int_or_void
  * Frame: fpo_leaf
  */
+/* PC: RECOMP SETTINGS' Cheats asks first (src/pause_tab.c "Use cheats?") over the page as it opens, the box
+ * with the pad: Yes leaves the page open, No goes back to the categories as B does. (The categories open the
+ * page in sub_00184AE0, the game's own: asked here, in the page's.) */
+int ngb_cheats_unlocked(void);    /* src/ingame_menu.c */
+int ngb_cheats_ask_open(void);    /* src/pause_tab.c */
+int ngb_cheats_ask_tick(void);
+static int s_cheat_asking, s_cheat_back;
+
 void sub_0017F4E0(void)
 {
     RECOMP_ENTRY(0x0017F4E0u);
+    /* (as the page opens -- sub_00184AE0 sets +0x18 to 2 and +0x11 to 1 -- not while it closes: the page stays 14) */
+    if (s_recomp && page_now() == PAGE_CHEAT && (MEM32(MENU_STATE + 0x18) & 2) && MEM8(MENU_STATE + 0x11) == 1 &&
+        !s_cheat_asking && !s_cheat_back && !ngb_cheats_unlocked() && ngb_cheats_ask_open())
+        s_cheat_asking = 1;
+    if (s_cheat_asking) {
+        int r = ngb_cheats_ask_tick();
+        if (r >= 0) {
+            s_cheat_asking = 0;
+            s_cheat_back = r == 0;
+        }
+    }
     uint32_t ebp = 0;
     ebp = g_ebp;  /* frameless: caller's frame */
     int _flags = 0; /* fallback flag var */
@@ -1095,6 +1119,14 @@ loc_0017F535: ;
     goto loc_0017F681;
 
 loc_0017F540: ;
+    if (s_cheat_back) {           /* PC: Use cheats? No: out as the page's Exit row (loc_0017F647's), to its parent */
+        s_cheat_back = 0;
+        if (s_recomp && page_now() == PAGE_CHEAT) {
+            MEM32(edi + 0x1C) = ZX8(MEM8(MEM32(edi + 0x28) + 6));
+            MEM32(0xDA4808) = 0x81;
+            goto loc_0017F681;
+        }
+    }
     _fa = (uint32_t)(MEM8(edi + 0xD)) & 0xFFu; _fb = (uint32_t)(LO8(ebx)) & 0xFFu;
     _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp MEM8(edi + 0xD), LO8(ebx) (8-bit) */
     if (CMP_EQ(_fa, _fb)) goto loc_0017F567; /* je: equal / zero */
@@ -2228,6 +2260,15 @@ void sub_00220870(void)
     esp += 4; return; /* ret */
 }
 
+/* The screen's shape with "21:9": the window's own, 2:1 (a phone) to 12:5 (ngb_settings_aspect_ratio), as the 3D is
+ * drawn for it; 64:27 before it is known (and for the frame another setting's shape is still there). For the
+ * renderer's drawings in the screen's shape (the quick menu, its letters, the glow, the sparks' strokes). */
+double ngb_aspect_21_9(void)
+{
+    double a = s_view_a;
+    return a > 2.0 - 0.01 && a < 12.0 / 5 + 0.02 ? a : 64.0 / 27;
+}
+
 /* The menus' and HUD's narrowing: the game lays them out for 4:3 and draws
  * them over the 3D whatever the screen's shape, stretched at 16:9. The
  * Direct3D renderer draws its screen-space draws into the back buffer
@@ -2243,5 +2284,102 @@ float ngb_hud_shape(void)
     if (stretch)
         return 1.0f;
     int a = ngb_pc_setting(7);
-    return a == 1 ? 0.75f : a == 2 ? 0.8333333f : a == 3 ? 0.5625f : a == 4 ? 0.375f : 1.0f;
+    if (a == 3)   /* "21:9": the screen's own, 2:1 (a phone) to 12:5 */
+        return (float)(4.0 / 3 / ngb_aspect_21_9());
+    return a == 1 ? 0.75f : a == 2 ? 0.8333333f : a == 4 ? 0.375f : 1.0f;
+}
+
+/* The camera in use copied into the view the frame is drawn with (0x977E00..), its vertical field
+ * of view (radians) into 0x977E30: the lifted routine, kept here (src/manual_functions.json) for
+ * one change. The game holds the vertical field of view and takes the horizontal one from the
+ * screen's shape, which is right for a screen wider than 16:9 (more at the sides) but on a
+ * narrower wide screen, 16:10, drew the 16:9 picture with its sides cut off (ng2recomp #129, the
+ * same here). There the vertical field of view is made taller instead, by as much as keeps the
+ * 16:9 picture's sides: the extra goes above and below. Changed in the view, not in the
+ * projection alone, so that everything reading it (what is in view, the level of detail, effects
+ * placed on the screen) agrees with what is drawn. The game's 4:3 mode is left as it is. */
+/**
+ * sub_0003FA50
+ * Original: 0x0003FA50 - 0x0003FAF7 (167 bytes, 41 insns)
+ * CC: cdecl, 0 params, returns int_or_void
+ * Frame: fpo_leaf
+ */
+static void camera_to_view(void)
+{
+    RECOMP_ENTRY(0x0003FA50u);
+    int _flags = 0; /* fallback flag var */
+    uint32_t _fa = 0, _fb = 0;
+    int32_t _fas = 0, _fbs = 0;
+    (void)_fa; (void)_fb; (void)_fas; (void)_fbs;
+
+loc_0003FA50: ;
+    _fb = (uint32_t)(8) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* sub source, before the write */
+    esp = esp - 8;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* sub result */
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(0) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0 (32-bit) */
+    if (CMP_L(_fas, _fbs)) goto loc_0003FA6C; /* jl: less (signed <) */
+
+loc_0003FA57: ;
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(2) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 2 (32-bit) */
+    if (CMP_GE(_fas, _fbs)) goto loc_0003FA6C; /* jge: greater or equal (signed >=) */
+
+loc_0003FA5C: ;
+    { int64_t _r = (int64_t)(int32_t)(eax) * (int64_t)(int32_t)(0x910);
+      eax = (uint32_t)_r;
+      _fa = (uint32_t)_r & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); _fb = (_r != (int64_t)(int32_t)_r); } /* imul */
+    SET_LO8(ecx, MEM8(eax + 0x4B4100));
+    _fa = (uint32_t)(LO8(ecx)) & 0xFFu; _fb = (uint32_t)(0) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* cmp LO8(ecx), 0 (8-bit) */
+    if (CMP_NE(_fa, _fb)) goto loc_0003FA72; /* jne: not equal / not zero */
+
+loc_0003FA6C: ;
+    eax = 0; /* xor self */
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */
+    _fb = (uint32_t)(8) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 8;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    esp += 4; return; /* ret */
+
+loc_0003FA72: ;
+    edx = eax + 0x4B3890;
+    SET_LO8(eax, MEM8(eax + 0x4B4102));
+    MEM32(esp + 4) = edx;
+    MEM8(0xDB9C6A) = LO8(eax);
+    MEM32(esp) = 0x977E00;
+    eax = MEM32(esp + 4);
+    ecx = MEM32(esp);
+    xmm0 = XMM_MEM(eax); /* movaps */
+    XMM_STORE(ecx, xmm0); /* movaps */
+    ecx = edx + 0x10;
+    MEM32(esp) = ecx;
+    MEM32(esp + 4) = 0x977E10;
+    eax = MEM32(esp);
+    ecx = MEM32(esp + 4);
+    xmm0 = XMM_MEM(eax); /* movaps */
+    XMM_STORE(ecx, xmm0); /* movaps */
+    xmm0 = XMM_SCALAR(MEMF(edx + 0x2C)); /* movss */
+    eax = MEM32(edx + 0x20);
+    ecx = MEM32(edx + 0x24);
+    MEMF(0x977E28) = xmm0.f[0]; /* movss */
+    xmm0 = XMM_SCALAR(MEMF(edx + 0x34)); /* movss */
+    MEMF(0x977E2C) = xmm0.f[0]; /* movss */
+    xmm0 = XMM_SCALAR(MEMF(edx + 0x30)); /* movss */
+    MEM32(0x977E20) = eax;
+    MEM32(0x977E24) = ecx;
+    MEMF(0x977E30) = xmm0.f[0]; /* movss */
+    eax = 1;
+    _fb = (uint32_t)(8) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 8;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    esp += 4; return; /* ret */
+
+}
+
+void sub_0003FA50(void)
+{
+    camera_to_view();
+    if (eax == 1 && s_screen_wide && s_view_a > 1.34 && s_view_a < 16.0 / 9 - 0.01)
+        MEMF(0x977E30) = (float)(2 * atan(tan(MEMF(0x977E30) * 0.5) * (16.0 / 9) / s_view_a));
 }
