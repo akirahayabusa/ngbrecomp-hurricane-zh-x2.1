@@ -271,6 +271,32 @@ static void yield_now(vcpu_thread *t)
 #include <sys/ucontext.h>
 static uintptr_t s_text_lo, s_text_hi;
 static void preempt_signal(int sig, siginfo_t *si, void *opaque)
+#elif defined(__linux__)
+#include <link.h>
+#include <ucontext.h>
+/* The executable code of the module this file is linked into (the program, or libmain.so on Android): the guest
+ * code is there, libc is not. 0, 0 when it could not be found -- then every preemption yields, as before. */
+static uintptr_t s_text_lo, s_text_hi;
+static int find_own_text(struct dl_phdr_info *info, size_t size, void *self)
+{
+    uintptr_t lo = UINTPTR_MAX, hi = 0;
+    (void)size;
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
+        if (ph->p_type == PT_LOAD && (ph->p_flags & PF_X)) {
+            uintptr_t a = (uintptr_t)info->dlpi_addr + ph->p_vaddr;
+            if (a < lo) lo = a;
+            if (a + ph->p_memsz > hi) hi = a + ph->p_memsz;
+        }
+    }
+    if ((uintptr_t)self >= lo && (uintptr_t)self < hi) {
+        s_text_lo = lo;
+        s_text_hi = hi;
+        return 1;
+    }
+    return 0;
+}
+static void preempt_signal(int sig, siginfo_t *si, void *opaque)
 #else
 static void preempt_signal(int sig)
 #endif
@@ -287,6 +313,22 @@ static void preempt_signal(int sig)
      * when the interrupted PC is back in the executable. */
     if (pc < s_text_lo || pc >= s_text_hi)
         return;
+#elif defined(__linux__)
+    (void)si;
+    /* The same on Linux and Android: a thread stopped inside glibc's fprintf, holding stderr's lock, and yielded
+     * there left every other thread that logs -- the next guest thread among them -- waiting on that lock for good
+     * (a hang loading Chapter 1, 2026-11-23). Retry next quantum when the interrupted PC is back in our code. */
+#if defined(__x86_64__)
+    uintptr_t pc = (uintptr_t)((ucontext_t *)opaque)->uc_mcontext.gregs[REG_RIP];
+#elif defined(__aarch64__)
+    uintptr_t pc = (uintptr_t)((ucontext_t *)opaque)->uc_mcontext.pc;
+#else
+    uintptr_t pc = s_text_lo;
+#endif
+    if (s_text_hi && (pc < s_text_lo || pc >= s_text_hi)) {
+        errno = saved;
+        return;
+    }
 #endif
     if (t && !t->in_vcpu && compat_host_depth() == 0) {
         yield_now(t);
@@ -333,6 +375,11 @@ static void vcpu_init_once(void)
     const uint8_t *text = getsegmentdata((const struct mach_header_64 *)_dyld_get_image_header(0), "__TEXT", &text_size);
     s_text_lo = (uintptr_t)text;
     s_text_hi = s_text_lo + text_size;
+    sa.sa_sigaction = preempt_signal;
+    sa.sa_flags = SA_RESTART | SA_SIGINFO;
+#elif defined(__linux__)
+    dl_iterate_phdr(find_own_text, (void *)&find_own_text);
+    fprintf(stderr, "[VCPU] preemption yields only in our own code: %p-%p\n", (void *)s_text_lo, (void *)s_text_hi);
     sa.sa_sigaction = preempt_signal;
     sa.sa_flags = SA_RESTART | SA_SIGINFO;
 #else
