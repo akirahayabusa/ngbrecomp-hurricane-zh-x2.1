@@ -86,10 +86,11 @@ enum { S_RENDER, S_TEXTURE, S_SHADOW, S_DISPLAY, S_VSYNC, S_FPS, S_WINDOW, S_ASP
        S_ONEHIT, S_UNLOCKS,                 /* not a setting: Cheats' row opening the Unlocks page */
        S_HUDSTYLE, S_HUDASPECT, S_TALISMAN, S_CROSSHAIR, S_INTERP,   /* (43, 44 unused here: x2.1 has its own talisman
                                                                        switch and bow crosshair, user 2026-11-16) */
-       S_COUNT };   /* (46 is taken, with no row: cheats_unlocked, src/ingame_menu.c -- a new setting here is 47) */
+       S_UNUSED46 /* (taken, with no row: cheats_unlocked, src/ingame_menu.c) */, S_SHURIKEN,
+       S_COUNT };
 _Static_assert(S_RTHREAD == 30 && S_ALLWEAP == 32 && S_ESSCHARGE == 33 && S_CUTSKIP == 34 && S_RESPONSIVE == 36 &&
-               S_HUDSTYLE == 41 && S_HUDASPECT == 42 && S_TALISMAN == 43 && S_CROSSHAIR == 44 && S_INTERP == 45,
-               "the S_ numbers are ngb_pc_setting's (src/ingame_menu.c)");
+               S_HUDSTYLE == 41 && S_HUDASPECT == 42 && S_TALISMAN == 43 && S_CROSSHAIR == 44 && S_INTERP == 45 &&
+               S_SHURIKEN == 47, "the S_ numbers are ngb_pc_setting's (src/ingame_menu.c)");
 
 static const char *const s_label[S_COUNT] = {
     "Render Resolution", "Anisotropic Filtering", "Shadow Resolution",
@@ -102,7 +103,7 @@ static const char *const s_label[S_COUNT] = {
     "Multithreaded Renderer", "", "All Weapons", "Essence-Only Charging", "Skip Any Cutscene", "",
     "Responsive Menus", "All Armlets", "All Scrolls",
     "One Hit Kill", "Unlocks", "HUD Style", "HUD Aspect", "Talisman of Rebirth",
-    "Bow Crosshair", "Frame Interpolation",
+    "Bow Crosshair", "Frame Interpolation", "", "Shuriken Icon",
 };
 static const char *const s_help[S_COUNT] = {
     "Draws the game at a multiple of the console's resolution.",
@@ -128,7 +129,7 @@ static const char *const s_help[S_COUNT] = {
     "A d-pad menu of weapons, Ninpo and items (Up and Down open it), at this size.",
     "Healing items, talismans and jewels are not used up. For this session only.",
     "Shuriken, smoke bombs, arrows and spears are not used up. For this session only.",
-    "Sounds placed around you. Console: as on the Xbox. Mixed: easier to place. Clear: by level only.",
+    "Sounds placed around you. Console: as on the Xbox. Mixed: brighter, easier to place. Clear: by level only.",
     "The health and Ninpo bar, weapons and the rest drawn over play. Off: a clear screen.",
     "Speakers. Auto: 5.1 when the output device has 5.1 or 7.1 channels, else stereo. Needs a restart of the game.",
     "MISSIONS in the main menu without earning it.",
@@ -151,6 +152,8 @@ static const char *const s_help[S_COUNT] = {
     "Off: a Talisman of Rebirth is never used; at no health Ryu dies, the talismans kept.",
     "On: a dot in the middle of the screen while aiming a bow in first person.",
     "Experimental. Pictures between the game's frames, on a 120 Hz or faster display.",
+    "",
+    "On: the HUD shows the Shuriken or Windmill Shuriken when one is equipped.",
 };
 
 /* The categories: the strip's words, their rows. */
@@ -171,7 +174,7 @@ static const signed char s_cat_rows[CATS + 1][CAT_ROWS] = {
     { S_RENDER, S_TEXTURE, S_MSAA, S_SHADOW, S_GLOW, S_LOADDETAIL, S_RTHREAD, S_INTERP, -1 },   /* -1 ends a page shorter than CAT_ROWS */
     { S_ASPECT, S_WINDOW, S_DISPLAY, S_VSYNC, S_FPS, S_HUD, S_HUDSTYLE, S_HUDASPECT, S_SKIP },   /* (a full page) */
     { S_POSAUDIO, S_AUDIOOUT, -1 },
-    { S_QUICKSCALE, S_QUICKFREEZE, S_ESSCHARGE, S_CUTSKIP, S_RESPONSIVE, -1 },
+    { S_QUICKSCALE, S_QUICKFREEZE, S_ESSCHARGE, S_CUTSKIP, S_RESPONSIVE, S_SHURIKEN, -1 },
     { S_HEALTH, S_NINPO, S_ESSENCE, S_SCARABS, S_INFITEMS, S_INFAMMO, S_ONEHIT, S_UNLOCKS, -1 },
     { -1 },
     { S_ALLDIFF, S_ALLCOST, S_MISSIONS, S_ARCADE, S_MOVIES, S_ALLWEAP, S_ALLARM, S_ALLSCROLL, -1 },
@@ -2414,7 +2417,7 @@ static void pt_draw(void)
 /* ---------- Are you sure? ---------- */
 
 /* A question and Yes / No in a box in the menus' colours, over the pause
- * menu (Exit's page) or the main menu (EXIT TO DESKTOP): the pad its, A or
+ * menu (Exit's page) or the main menu (EXIT GAME): the pad its, A or
  * left/right to choose, B for No (src/ingame_menu.c's pad for the tab). */
 void ngb_tab_take_pad(void);          /* src/ingame_menu.c */
 void ngb_tab_give_pad(void);
@@ -2859,12 +2862,12 @@ int ngb_confirm_hit(float x, float y)
     return -1;
 }
 
-/* The main menu's EXIT TO DESKTOP (src/main_menu.c): the box, each frame
+/* The main menu's EXIT GAME (src/main_menu.c): the box, each frame
  * of the main menu's drawer; Yes closes the game. */
 static int s_mm_exit;
 void ngb_main_menu_exit(void)
 {
-    if (!s_mm_exit && ngb_confirm_open("Exit to Desktop?", 0))
+    if (!s_mm_exit && ngb_confirm_open("Exit Game?", 0))
         s_mm_exit = 1;
 }
 
@@ -3003,19 +3006,19 @@ void ngb_talisman_item_page(void)
 /* Return to Game (the game's own Exit: the menu closed, as Start does),
  * Return to Main Menu (the game has no way back from play but the console's
  * reset: the program starts again, at the main menu -- src/ingame_menu.c)
- * and Exit to Desktop; the last two after a second A. */
+ * and Exit Game; the last two after a second A. */
 void ngb_pause_resume(void);          /* src/ingame_menu.c */
 void ngb_restart_to_menu(void);
 void ngb_quit_to_desktop(void);
 
 #define EXIT_ROWS 3
-static const char *const s_exit_label[EXIT_ROWS] = { "Return to Game", "Return to Main Menu", "Exit to Desktop" };
+static const char *const s_exit_label[EXIT_ROWS] = { "Return to Game", "Return to Main Menu", "Exit Game" };
 static const char *const s_exit_help[EXIT_ROWS] = {
     "Closes this menu.",
     "Back to the main menu. Unsaved progress is lost.",
     "Closes the game. Unsaved progress is lost.",
 };
-static const char *const s_exit_q[EXIT_ROWS] = { "", "Return to the Main Menu?", "Exit to Desktop?" };
+static const char *const s_exit_q[EXIT_ROWS] = { "", "Return to the Main Menu?", "Exit Game?" };
 static int s_exit_row, s_exit_armed = -1;   /* (no longer armed: the box asks) */
 
 static void draw_exit_page(int focused, int row, int armed)

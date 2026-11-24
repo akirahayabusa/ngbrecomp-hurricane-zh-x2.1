@@ -72,6 +72,7 @@ constexpr uint32_t kDsErrInvalidCall = 0x88780032u, kEFail = 0x80004005u;
 std::atomic<int> g_positional{2};
 // "Mixed" (Positional Audio 3): the filters' share of each ear, the rest "Clear"'s level -- the filters' cues for
 // where a sound is (behind, to the side) with less of their dullness (#126). NGB_POS_MIX=0..1 sets it, for tuning.
+// (Taken out in 0.9.83 and back in 0.9.84: heard as brighter and nearer the newer consoles than "Console", #270.)
 float g_pos_mix = 0.5f;
 // "Mixed"'s level half by the sound's direction (EarPair::mixpan): the far ear 6 dB down for a sound straight to one
 // side. Clear's levels -- the filters' strengths, a few dB apart and least in the bass -- left the hooves and footsteps
@@ -464,6 +465,20 @@ float ChipTap(uint8_t b) {
     return b & 0x80 ? -v : v;
 }
 
+// "Console"'s filters brought up to the loudness of "Mixed" (#270): the filters as the chip reads them are 9 to 20 dB
+// down by direction, and the 3D sounds came out about 5 dB below "Mixed" against the music (a chest opened in a
+// cave: -22 dB peak against -17). Measured on the 3D sounds alone over that scene, +9.5 dB on the filters puts them
+// level with "Mixed" (+10: 0.4 dB over); the differences between directions stay. NGB_DSOUND_CHIP_GAIN=<dB> sets it
+// instead (0: the chip's own level, as 0.9.81-0.9.82).
+float ChipGain() {
+    static const float gain = [] {
+        const char* g = std::getenv("NGB_DSOUND_CHIP_GAIN");
+        float db = g && *g ? float(std::atof(g)) : 9.5f;
+        return std::isfinite(db) ? std::pow(10.0f, std::clamp(db, -60.0f, 30.0f) / 20.0f) : 1.0f;
+    }();
+    return gain;
+}
+
 // the two ears' filters for a direction: the table's far ear is the left for a sound on the right
 EarPair Ears(float azimuth, float elevation, bool chip) {
     EarPair p;
@@ -474,7 +489,7 @@ EarPair Ears(float azimuth, float elevation, bool chip) {
         const uint8_t* t = f + k * 32;
         Ear& ear = p.e[k == 0 ? far : 1 - far];
         for (int i = 0; i < kHrtfTaps; i++)
-            ear.tap[i] = chip ? ChipTap(t[i]) : (t[i] & 0x80 ? -float(t[i] & 0x7F) : float(t[i])) / 128.0f;
+            ear.tap[i] = chip ? ChipTap(t[i]) * ChipGain() : (t[i] & 0x80 ? -float(t[i] & 0x7F) : float(t[i])) / 128.0f;
         ear.delay = t[31];
         for (int i = 1; i < kHrtfTaps; i++)
             if (std::fabs(ear.tap[i]) > std::fabs(ear.tap[ear.peak])) ear.peak = i;
@@ -816,8 +831,13 @@ void Render(float* out, uint32_t frames) {
     {
         std::lock_guard<std::recursive_mutex> lock(g_lock);
         int mode = g_positional.load();
+        // NGB_DSOUND_ONLY=3d or 2d: those voices alone (measuring the 3D sounds' level against another choice's)
+        static const int only = [] {
+            const char* o = std::getenv("NGB_DSOUND_ONLY");
+            return !o ? 0 : (o[0] == '3') ? 3 : (o[0] == '2') ? 2 : 0;
+        }();
         for (auto& [obj, v] : g_voices)
-            if (v.playing) MixVoice(v, lanes.data(), send.data(), frames, mode);
+            if (v.playing && (!only || (only == 3) == v.is3d)) MixVoice(v, lanes.data(), send.data(), frames, mode);
         static const bool reverb = !(std::getenv("NGB_DSOUND_REVERB") && *std::getenv("NGB_DSOUND_REVERB") == '0');
         if (reverb) g_reverb.Run(send.data(), lanes.data(), frames);
     }

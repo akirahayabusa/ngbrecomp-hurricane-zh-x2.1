@@ -67,7 +67,7 @@ enum { ROW_SCREEN, ROW_MOVIE, ROW_PC, ROW_DEFAULT, ROW_EXIT,
        ROW_GLOW, ROW_QUICKFREEZE, ROW_QUICKSCALE, ROW_INFITEMS, ROW_INFAMMO, ROW_POSAUDIO, ROW_HUD, ROW_AUDIOOUT,
        ROW_MISSIONS, ROW_ARCADE, ROW_MOVIES, ROW_UNLOCKS, ROW_LOADDETAIL, ROW_RTHREAD,
        ROW_ALLWEAP, ROW_ESSCHARGE, ROW_CUTSKIP, ROW_RESPONSIVE, ROW_ALLARM, ROW_ALLSCROLL, ROW_ONEHIT,
-       ROW_HUDSTYLE, ROW_HUDASPECT, ROW_TALISMAN, ROW_CROSSHAIR, ROW_INTERP,
+       ROW_HUDSTYLE, ROW_HUDASPECT, ROW_TALISMAN, ROW_CROSSHAIR, ROW_INTERP, ROW_SHURIKEN,
        ROW_KINDS   /* (the tables indexed by a row kind have one entry each: checked where they are) */
 };
 
@@ -84,7 +84,7 @@ static const uint8_t s_rows_gfx[] = { ROW_RENDER, ROW_TEXTURE, ROW_MSAA, ROW_SHA
 static const uint8_t s_rows_disp[] = { ROW_ASPECT, ROW_WINDOW, ROW_DISPLAY, ROW_VSYNC, ROW_FPS, ROW_HUD, ROW_HUDSTYLE, ROW_HUDASPECT, ROW_SKIP,
                                        ROW_BACK };
 static const uint8_t s_rows_sound[] = { ROW_POSAUDIO, ROW_AUDIOOUT, ROW_BACK };
-static const uint8_t s_rows_game[] = { ROW_QUICKSCALE, ROW_QUICKFREEZE, ROW_ESSCHARGE, ROW_CUTSKIP, ROW_RESPONSIVE, ROW_BACK };
+static const uint8_t s_rows_game[] = { ROW_QUICKSCALE, ROW_QUICKFREEZE, ROW_ESSCHARGE, ROW_CUTSKIP, ROW_RESPONSIVE, ROW_SHURIKEN, ROW_BACK };
 static const uint8_t s_rows_cheat[] = { ROW_HEALTH, ROW_NINPO, ROW_ESSENCE, ROW_SCARABS, ROW_INFITEMS, ROW_INFAMMO,
                                         ROW_ONEHIT, ROW_UNLOCKS, ROW_BACK };
 static const uint8_t s_rows_ctrl[] = { ROW_BACK };
@@ -116,8 +116,8 @@ static const struct { const uint8_t *kinds; int n; } s_ours[N_OURS] = {
 #define T_POSAUDIO 0x201C9            /* Positional Audio (the APU's HRTF filters, #30) */
 #define D_POSAUDIO 0x201CA
 #define T_POSCONSOLE 0x201CD          /* Positional Audio's values: Console, Clear */
-#define T_POSPAN   0x201CE
 #define T_POSMIX   0x201FB            /* Positional Audio's Mixed (#126) */
+#define T_POSPAN   0x201CE
 #define T_HUD      0x201CB            /* the HUD on or off (src/hud.c, #80) */
 #define D_HUD      0x201CC
 #define T_HUDSTYLE 0x201FC            /* HUD Style (src/d3d/vk/backend.cpp, #121) and its values */
@@ -136,6 +136,8 @@ static const struct { const uint8_t *kinds; int n; } s_ours[N_OURS] = {
 #define T_INTERP0  0x2020A            /* + 0..3: Off, Full Rate, Half Rate, 2x */
 #define T_GLOW0    0x2020E            /* + 0..3: Bloom's (Original, Reduced: no longer offered), On, Off */
 #define T_ALLWEAP0 0x20212            /* + 0..2: All Weapons' Off, Level 1, Max Level (#268) */
+#define T_SHURIKEN 0x20215            /* Shuriken Icon (src/hud.c, #276) */
+#define D_SHURIKEN 0x20216
 #define T_AUDIOOUT 0x201CF            /* Audio Output: Auto, Stereo, 5.1 (src/audio) */
 #define D_AUDIOOUT 0x201D0
 #define T_AUTO     0x201D1
@@ -237,8 +239,8 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_QUICKFREEZE, "Quick Menu Pause" },
     { T_POSAUDIO, "Positional Audio" },
     { T_POSCONSOLE, "Console" },
-    { T_POSPAN, "Clear" },
     { T_POSMIX, "Mixed" },
+    { T_POSPAN, "Clear" },
     { T_HUD, "HUD" },
     { T_HUDSTYLE, "HUD Style" },
     { D_HUDSTYLE, "Compact: the health bar, weapon and karma window smaller and nearer the screen's corners." },
@@ -251,6 +253,8 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { D_TALISMAN, "Off: a Talisman of Rebirth is never used; at no health Ryu dies, the talismans kept." },
     { T_CROSSHAIR, "Bow Crosshair" },
     { D_CROSSHAIR, "On: a dot in the middle of the screen while aiming a bow in first person." },
+    { T_SHURIKEN, "Shuriken Icon" },
+    { D_SHURIKEN, "On: the HUD shows the Shuriken or Windmill Shuriken when one is equipped." },
     { T_INTERP, "Frame Interpolation" },
     { D_INTERP, "Experimental. Pictures between the game's frames, on a 120 Hz or faster display." },
     { T_INTERP0 + 0, "Off" }, { T_INTERP0 + 1, "Full Rate" }, { T_INTERP0 + 2, "Half Rate" }, { T_INTERP0 + 3, "2x" },
@@ -262,7 +266,7 @@ static const struct { uint32_t id; const char *text; } s_text[] = {
     { T_AUTO, "Auto" },
     { T_STEREO, "Stereo" },
     { T_SURROUND, "5.1" },
-    { D_POSAUDIO, "Sounds placed around you. Console: as on the Xbox. Mixed: easier to place. Clear: by level only." },
+    { D_POSAUDIO, "Sounds placed around you. Console: as on the Xbox. Mixed: brighter, easier to place. Clear: by level only." },
     { T_QUICKSCALE, "Quick Menu" },
     { D_QUICKSCALE, "A d-pad menu of weapons, Ninpo and items (Up and Down open it), at this size." },
     { D_GAMEPLAY, "Optional changes to how the game plays, each off unless chosen: the Quick Menu." },
@@ -439,7 +443,7 @@ static uint32_t make_labels(const uint8_t *kinds, int n)
                                    T_ALLWEAP, T_ESSCHARGE, T_CUTSKIP, T_RESPONSIVE, T_ALLARM,
                                    T_ALLSCROLL, T_ONEHIT, T_HUDSTYLE, T_HUDASPECT,
                                    T_TALISMAN, T_CROSSHAIR,   /* (on no page here: x2.1 has its own, user 2026-11-16) */
-                                   T_INTERP };
+                                   T_INTERP, T_SHURIKEN };
     _Static_assert(sizeof id / sizeof id[0] == ROW_KINDS, "a label for each row kind");
     uint32_t va = xbox_HeapAlloc(4 * n, 4);
     for (int i = 0; i < n; i++)
@@ -855,6 +859,7 @@ static uint32_t pc_value_id(int row, uint32_t movie_id)
     case ROW_HUDASPECT: return ngb_pc_setting(42) ? T_CORRECTED : T_STRETCHED;
     case ROW_TALISMAN: return ngb_pc_setting(43) ? T_ON : T_OFF;
     case ROW_CROSSHAIR: return ngb_pc_setting(44) ? T_ON : T_OFF;
+    case ROW_SHURIKEN: return ngb_pc_setting(47) ? T_ON : T_OFF;
     case ROW_INTERP: return T_INTERP0 + (uint32_t)ngb_pc_setting(45);
     case ROW_AUDIOOUT: return ngb_pc_setting(25) == 2 ? T_SURROUND : ngb_pc_setting(25) ? T_STEREO : T_AUTO;
     case ROW_QUICKSCALE: {
@@ -928,6 +933,7 @@ static int pc_value_change(int row, int delta)
     case ROW_HUDASPECT: ngb_pc_set_setting(42, !ngb_pc_setting(42)); break;
     case ROW_TALISMAN: ngb_pc_set_setting(43, !ngb_pc_setting(43)); break;
     case ROW_CROSSHAIR: ngb_pc_set_setting(44, !ngb_pc_setting(44)); break;
+    case ROW_SHURIKEN: ngb_pc_set_setting(47, !ngb_pc_setting(47)); break;
     case ROW_INTERP: ngb_pc_set_setting(45, (ngb_pc_setting(45) + (step > 0 ? 1 : 3)) % 4); break;
     case ROW_AUDIOOUT: ngb_pc_set_setting(25, (ngb_pc_setting(25) + (step > 0 ? 1 : 2)) % 3); break;
     case ROW_QUICKSCALE: ngb_pc_set_setting(20, ngb_quick_scale_step(ngb_pc_setting(20), step)); break;
@@ -2206,7 +2212,7 @@ void sub_00220870(void)
                                            D_RESPONSIVE & 0xFFFF, D_ALLARM & 0xFFFF, D_ALLSCROLL & 0xFFFF,
                                            D_ONEHIT & 0xFFFF, D_HUDSTYLE & 0xFFFF,
                                            D_HUDASPECT & 0xFFFF, D_TALISMAN & 0xFFFF, D_CROSSHAIR & 0xFFFF,
-                                           D_INTERP & 0xFFFF };
+                                           D_INTERP & 0xFFFF, D_SHURIKEN & 0xFFFF };
     _Static_assert(sizeof video_kind / sizeof video_kind[0] == ROW_KINDS, "a help for each row kind");
     RECOMP_ENTRY(0x00220870u);
     uint32_t out = ecx;

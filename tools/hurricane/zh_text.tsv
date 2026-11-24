@@ -5,7 +5,7 @@ ctx	en	zh	use
 # Terms follow the x2.1 glossary (精魂, 忍法, 黄金圣甲虫, 服装, 风驱, 强攻击, 防御, 飞行道具, 业力, 开/关, 是/否).
 # --- main menu (src/main_menu.c)
 	RECOMP SETTINGS	重编设置	E
-	EXIT TO DESKTOP	退出到桌面	E
+	EXIT GAME	退出游戏	E
 # --- RECOMP SETTINGS and Screen Settings pages, the game's own menu (src/pc_menu.c)
 	PC Settings	重编设置	E
 	Render Resolution	渲染分辨率	E
@@ -156,11 +156,11 @@ cat	Controls	按键	P
 	EXTRA 7	隐藏 7	P
 	EXTRA 8	隐藏 8	P
 	EXTRA 9	隐藏 9	P
-	Exit to Desktop?	要退出到桌面吗？	P
+	Exit Game?	要退出游戏吗？	P
 	Return to the Main Menu?	要返回主菜单吗？	P
 	Return to Game	返回游戏	P
 	Return to Main Menu	返回主菜单	P
-	Exit to Desktop	退出到桌面	P
+	Exit Game	退出游戏	P
 	Closes this menu.	关闭此菜单	P
 	Back to the main menu. Unsaved progress is lost.	返回主菜单。未保存的进度将会丢失	P
 	Closes the game. Unsaved progress is lost.	关闭游戏。未保存的进度将会丢失	P
@@ -281,4 +281,7 @@ cat	Controls	按键	P
 	Max Level	最高等级	E
 	Every weapon, at Level 1 or at its highest level, with its ammunition. Turned off, they are taken back.	全部武器，1级或最高等级，附带弹药。关闭后收回	E
 	The game's glow around bright things, steady and even at any resolution.	游戏中亮处周围的泛光，在任何分辨率下都稳定一致	E
-	Sounds placed around you. Console: as on the Xbox. Mixed: easier to place. Clear: by level only.	把声音分到四周。主机原版：与Xbox相同。混合：更容易分辨方位。清晰：只按音量	E
+	Sounds placed around you. Console: as on the Xbox. Mixed: brighter, easier to place. Clear: by level only.	把声音分到四周。主机原版：与Xbox相同。混合：更明亮，更容易分辨方位。清晰：只按音量	E
+# --- 0.9.83-0.9.84 (Shuriken Icon)
+	Shuriken Icon	手里剑图标	E
+	On: the HUD shows the Shuriken or Windmill Shuriken when one is equipped.	开：装备手里剑或风车手里剑时，HUD 显示其图标	E

@@ -106,7 +106,7 @@ void ngb_menu_set_running(const NgbSettings *s)
  * audio (0 off, 1 the HRTF filters, 2 clear, their levels only; #30, #86), 24 the HUD (src/hud.c, #80), 25 the audio
  * output (0 auto, 1 stereo, 2 5.1; src/audio), 26-28 the main menu's MISSIONS, ARCADE NINJA GAIDEN and
  * MOVIE THEATER unlocked (src/cheats.c, saved), 29 Lower Detail Under Load (src/d3d/d3d.c), 30 the render thread
- * (src/d3d/hle.cpp, the Multithreaded Renderer), 31 unused (upstream's Intercept, #109, left out: x2.1 has its own), 32 all weapons (a cheat), 33 Essence-Only Charging (src/ut_charge.c), 34 Skip Any Cutscene (src/cutscene_skip.c), 35 unused (the GPU driver was, #151), 36 Responsive Menus (src/responsive.c), 37 all armlets, 38 all technique scrolls and 39 one hit kill (cheats). A change applies at once (8, 9 and 25 at the next start, 30 after a restart) and is saved, the
+ * (src/d3d/hle.cpp, the Multithreaded Renderer), 31 unused (upstream's Intercept, #109, left out: x2.1 has its own), 32 all weapons (a cheat), 33 Essence-Only Charging (src/ut_charge.c), 34 Skip Any Cutscene (src/cutscene_skip.c), 35 unused (the GPU driver was, #151), 36 Responsive Menus (src/responsive.c), 37 all armlets, 38 all technique scrolls and 39 one hit kill (cheats), 41 HUD Style (#121), 42 HUD Aspect, 43, 44 unused (x2.1 has its own talisman switch and bow crosshair), 45 Frame Interpolation (src/d3d/gpu/threaded.cpp), 47 Shuriken Icon (src/hud.c). A change applies at once (8, 9 and 25 at the next start, 30 after a restart) and is saved, the
  * cheats' not. */
 int ngb_cheat(int which);
 void ngb_cheat_set(int which, int on);
@@ -116,11 +116,11 @@ void ngb_set_all_difficulties(int on);   /* src/cheats.c */
 void ngb_set_all_costumes(int on);
 void ngb_set_unlock(int which, int on);
 
-/* Positional Audio's next value in the menus' order -- Off, Clear, Mixed, Console -- not the values' (0 off, 1 console,
- * 2 clear, 3 mixed: the saved numbers kept) */
+/* Positional Audio's next value in the menus' order -- Console, Mixed, Clear, Off -- not the values' (0 off,
+ * 1 console, 2 clear, 3 mixed: the saved numbers kept) */
 int ngb_positional_step(int v, int step)
 {
-    static const int order[4] = { 0, 2, 3, 1 };
+    static const int order[4] = { 1, 3, 2, 0 };
     int i = 0;
     while (i < 4 && order[i] != v)
         i++;
@@ -181,6 +181,7 @@ int ngb_pc_setting(int which)
     case 44: return 0;   /* Hurricane: upstream's Bow Crosshair not taken -- x2.1 has its own (画面设置) */
     case 45: return s_running.frame_interp;
     case 46: return s_running.cheats_unlocked;
+    case 47: return s_running.shuriken_icon;
     case 29: return s_running.detail_under_load;
     case 30: return s_running.render_thread;
     case 33: return s_running.essence_charging;
@@ -220,7 +221,7 @@ void ngb_pc_set_setting(int which, int value)
     case 8: s_running.skip_intro = value; break;        /* both at the next start */
     case 9: s_running.show_launcher = value; break;
     case 18: s_running.smooth_glow = value == 3 ? 3 : 2; break;
-    case 23: s_running.positional_audio = value < 0 ? 0 : value > 3 ? 3 : value; ngb_audio_set_positional(s_running.positional_audio); break;
+    case 23: s_running.positional_audio = value < 0 || value > 3 ? 1 : value; ngb_audio_set_positional(s_running.positional_audio); break;
     case 24: s_running.show_hud = !!value; break;
     case 41: s_running.hud_style = !!value; break;
     case 42: s_running.hud_aspect = !!value; break;
@@ -228,6 +229,7 @@ void ngb_pc_set_setting(int which, int value)
     case 44: s_running.bow_crosshair = !!value; break;
     case 45: s_running.frame_interp = value < 0 ? 0 : value > 3 ? 3 : value; break;   /* at the next frame (src/d3d/hle.cpp) */
     case 46: s_running.cheats_unlocked = !!value; break;
+    case 47: s_running.shuriken_icon = !!value; break;
     case 29: s_running.detail_under_load = !!value; break;
     case 30: s_running.render_thread = !!value; break;   /* at the next start */
     case 33: s_running.essence_charging = !!value; break;
@@ -555,7 +557,7 @@ void ngb_karma_window_press(void)
         pulse_push(0x100 | (1u << b));
 }
 
-/* Exit to Desktop: as closing the window does. */
+/* Exit Game: as closing the window does. */
 void ngb_quit_to_desktop(void)
 {
     SDL_Event e = { .type = SDL_QUIT };

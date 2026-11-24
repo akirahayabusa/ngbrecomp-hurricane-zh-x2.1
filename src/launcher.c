@@ -215,6 +215,8 @@ void ngb_settings_load(NgbSettings *s)
             s->text_language = !SDL_strncasecmp(val, "en", 2) ? 1 : !SDL_strncasecmp(val, "ja", 2) ? 2 : 0;   /* english, en, Japanese, ja... */
         } else if (!strcmp(key, "bow_crosshair")) {
             s->bow_crosshair = atoi(val) != 0;
+        } else if (!strcmp(key, "shuriken_icon")) {
+            s->shuriken_icon = atoi(val) != 0;
         } else if (!strcmp(key, "hud_aspect")) {
             s->hud_aspect = atoi(val) != 0;
         } else if (!strcmp(key, "cheats_unlocked")) {
@@ -222,7 +224,7 @@ void ngb_settings_load(NgbSettings *s)
         } else if (!strcmp(key, "show_hud")) {
             s->show_hud = atoi(val) != 0;
         } else if (!strcmp(key, "positional_audio")) {
-            s->positional_audio = atoi(val) < 0 ? 0 : atoi(val) > 3 ? 3 : atoi(val);   /* 0 off, 1 console, 2 clear, 3 mixed */
+            s->positional_audio = atoi(val) < 0 || atoi(val) > 3 ? 1 : atoi(val);   /* 0 off, 1 console, 2 clear, 3 mixed */
         } else if (!strcmp(key, "smoother_glow")) {   /* before 0.9.73: On either way now (#270) */
             s->smooth_glow = 2;
         } else if (!strcmp(key, "bloom")) {   /* 2 On, 3 Off; 0 Original and 1 Reduced are On now (#270) */
@@ -264,10 +266,6 @@ void ngb_settings_load(NgbSettings *s)
     /* 0.9.43 had Skip Any Cutscene on unless turned off, and wrote it on into every file it saved: off unless chosen */
     if (defaults == 3)
         s->skip_cutscenes = 0;
-    /* 0.9.52 made Mixed the Positional Audio default (#126): a file from before with Clear, the old default, gets it
-     * once (a Clear chosen on purpose included: the file cannot tell, and it is one change back) */
-    if (defaults < 5 && s->positional_audio == 2)
-        s->positional_audio = 3;
     /* 0.9.81 made Console the default for everyone (#270: it now matches a console's capture): every file from before
      * gets it once, whatever it had */
     if (defaults < 6)
@@ -316,6 +314,7 @@ void ngb_settings_save(const NgbSettings *s)
     fprintf(f, "cheats_unlocked = %d\n", s->cheats_unlocked);
     fprintf(f, "talisman_of_rebirth = %d\n", s->talisman);
     fprintf(f, "bow_crosshair = %d\n", s->bow_crosshair);
+    fprintf(f, "shuriken_icon = %d\n", s->shuriken_icon);
     fprintf(f, "text_language = %s\n", s->text_language == 2 ? "japanese" : s->text_language == 1 ? "english" : "auto");
     fprintf(f, "frame_interpolation = %d\n", s->frame_interp);
     fprintf(f, "audio_output = %d\n", s->audio_output);
