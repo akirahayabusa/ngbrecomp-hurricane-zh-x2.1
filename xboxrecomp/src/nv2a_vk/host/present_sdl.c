@@ -1121,6 +1121,13 @@ static bool area_draw(PGRAPHVkState *r, VkCommandBuffer cmd, uint32_t idx, int l
 
 /* Display modes: 0 a window, 1 fullscreen (the desktop's), 2 borderless
  * (no frame, over the whole display). */
+
+/* Window changes asked for by the overlay and the menus (another thread), made on the main thread, which owns the
+ * window: the mode and the window size last asked for (F11 / Alt+Enter come back to them), and how many changes
+ * were asked for and how many of those made (pending while they differ). */
+static int s_win_req, s_win_w, s_win_h, s_win_fs;
+static unsigned s_win_asked, s_win_made;
+
 static void borderless_apply(SDL_Window *w)
 {
     SDL_Rect r;
@@ -1130,6 +1137,38 @@ static void borderless_apply(SDL_Window *w)
     SDL_SetWindowBordered(w, SDL_FALSE);
     SDL_SetWindowPosition(w, r.x, r.y);
     SDL_SetWindowSize(w, r.w, r.h);
+}
+
+/* A window of want_w x want_h, framed, in the middle of its display's usable area (the taskbar left out) -- made
+ * smaller, its shape kept, when it and its frame would not fit. A size from the list bigger than the display (2560 x
+ * 1440 on a 1920 x 1200 one: the title bar went above the screen and the window covered it all) looked like no
+ * window at all. */
+static void window_fit(SDL_Window *w, int want_w, int want_h)
+{
+    SDL_Rect u;
+    int d = SDL_GetWindowDisplayIndex(w);
+    int top = 0, left = 0, bottom = 0, right = 0;
+    if (want_w <= 0 || want_h <= 0)
+        SDL_GetWindowSize(w, &want_w, &want_h);
+    if (SDL_GetDisplayUsableBounds(d < 0 ? 0 : d, &u) != 0 || u.w <= 0 || u.h <= 0) {
+        SDL_SetWindowSize(w, want_w, want_h);           /* (no display's area known: as asked) */
+        SDL_SetWindowPosition(w, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        return;
+    }
+    if (SDL_GetWindowBordersSize(w, &top, &left, &bottom, &right) != 0) {
+        top = 32;                                       /* (not known yet: a title bar's and a frame's usual) */
+        left = right = bottom = 8;
+    }
+    int aw = u.w - left - right, ah = u.h - top - bottom, ww = want_w, wh = want_h;
+    if (aw > 0 && ah > 0 && (ww > aw || wh > ah)) {
+        double s = (double)aw / ww < (double)ah / wh ? (double)aw / ww : (double)ah / wh;
+        ww = (int)(ww * s);
+        wh = (int)(wh * s);
+        fprintf(stderr, "nv2a: a %dx%d window does not fit the display's %dx%d: %dx%d\n", want_w, want_h, u.w, u.h,
+                ww, wh);
+    }
+    SDL_SetWindowSize(w, ww, wh);
+    SDL_SetWindowPosition(w, u.x + left + (aw > ww ? (aw - ww) / 2 : 0), u.y + top + (ah > wh ? (ah - wh) / 2 : 0));
 }
 
 int nv2a_window_create(const char *title, int width, int height,
@@ -1173,6 +1212,11 @@ int nv2a_window_create(const char *title, int width, int height,
     SDL_StopTextInput();
     if (fullscreen == 2)
         borderless_apply(s_window);
+    else if (fullscreen == 0)
+        window_fit(s_window, width, height);   /* (a size bigger than the display: made to fit) */
+    s_win_w = width;                           /* the mode asked for: F11 comes back to it */
+    s_win_h = height;
+    s_win_fs = fullscreen;
     if (aspect > 0)
         s_aspect = aspect;
     else if (aspect < 0)
@@ -1181,14 +1225,19 @@ int nv2a_window_create(const char *title, int width, int height,
     return 0;
 }
 
-/* Window changes asked for by the overlay (renderer thread), made here on
- * the main thread, which owns the window. */
-static int s_win_req, s_win_w, s_win_h, s_win_fs;
-
 int nv2a_window_mode(int *width, int *height)
 {
     if (!s_window)
         return -1;
+    /* A change asked for and not yet made (or being made) is the mode: the menus show it, and a second press
+     * steps on from it, not from the mode it leaves */
+    if (__atomic_load_n(&s_win_asked, __ATOMIC_ACQUIRE) != __atomic_load_n(&s_win_made, __ATOMIC_ACQUIRE)) {
+        if (s_win_fs == 0 && s_win_w > 0 && s_win_h > 0) {
+            *width = s_win_w;
+            *height = s_win_h;
+        }
+        return s_win_fs;
+    }
     Uint32 flags = SDL_GetWindowFlags(s_window);
     if (flags & SDL_WINDOW_FULLSCREEN)
         return 1;
@@ -1213,6 +1262,7 @@ void nv2a_window_request(int width, int height, int fullscreen)   /* mode: 0, 1,
     s_win_w = width;
     s_win_h = height;
     s_win_fs = fullscreen;
+    __atomic_add_fetch(&s_win_asked, 1, __ATOMIC_ACQ_REL);
     __atomic_store_n(&s_win_req, 1, __ATOMIC_RELEASE);
 }
 
@@ -1288,6 +1338,33 @@ static void mode_switch_end(void)
     __atomic_store_n(&s_switching, 0, __ATOMIC_SEQ_CST);
 }
 
+/* Every display mode change -- the menus', F11's and Alt+Enter's -- one way, from whatever state the window is in.
+ * A window maximized (its title bar double-clicked, Win+Up, dragged to the top) kept that through the changes, and a
+ * window asked for then came back maximized over the whole screen, its title bar above it; out of fullscreen F11
+ * gave back the window as it was before (a borderless one, framed now, as big as the display). So: out of
+ * fullscreen first, the maximizing undone, then the mode's own shape -- a window of the size asked for, made to fit
+ * the display (window_fit), or borderless over the display, or the desktop's fullscreen. */
+static void window_apply(int mode, int width, int height)
+{
+    Uint32 fl = SDL_GetWindowFlags(s_window);
+    mode_switch_begin();
+    if (mode != 1 && (fl & SDL_WINDOW_FULLSCREEN))
+        SDL_SetWindowFullscreen(s_window, 0);
+    if (!(SDL_GetWindowFlags(s_window) & SDL_WINDOW_FULLSCREEN) &&
+        (SDL_GetWindowFlags(s_window) & SDL_WINDOW_MAXIMIZED))
+        SDL_RestoreWindow(s_window);
+    if (mode == 0) {
+        SDL_SetWindowBordered(s_window, SDL_TRUE);
+        window_fit(s_window, width, height);
+    } else if (mode == 2) {
+        borderless_apply(s_window);
+    } else if (!(fl & SDL_WINDOW_FULLSCREEN)) {
+        SDL_SetWindowBordered(s_window, SDL_TRUE);   /* (framed when it comes out of fullscreen) */
+        SDL_SetWindowFullscreen(s_window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+    }
+    mode_switch_end();
+}
+
 bool nv2a_window_pump(void)
 {
 #ifdef __APPLE__
@@ -1317,22 +1394,9 @@ bool nv2a_window_pump(void)
     SDL_Event ev;
 
     if (__atomic_exchange_n(&s_win_req, 0, __ATOMIC_ACQ_REL)) {
-        bool fs = SDL_GetWindowFlags(s_window) & SDL_WINDOW_FULLSCREEN;
-        mode_switch_begin();
-        if (s_win_fs != 1 && fs)
-            SDL_SetWindowFullscreen(s_window, 0);
-        if (s_win_fs != 2)
-            SDL_SetWindowBordered(s_window, SDL_TRUE);
-        if (s_win_fs == 0 && s_win_w > 0 && s_win_h > 0) {
-            SDL_SetWindowSize(s_window, s_win_w, s_win_h);
-            SDL_SetWindowPosition(s_window, SDL_WINDOWPOS_CENTERED,
-                                  SDL_WINDOWPOS_CENTERED);
-        }
-        if (s_win_fs == 2)
-            borderless_apply(s_window);
-        if (s_win_fs == 1 && !fs)
-            SDL_SetWindowFullscreen(s_window, SDL_WINDOW_FULLSCREEN_DESKTOP);
-        mode_switch_end();
+        unsigned seq = __atomic_load_n(&s_win_asked, __ATOMIC_ACQUIRE);   /* (one asked for meanwhile stays pending) */
+        window_apply(s_win_fs, s_win_w, s_win_h);
+        __atomic_store_n(&s_win_made, seq, __ATOMIC_RELEASE);
     }
 
     while (SDL_PollEvent(&ev)) {
@@ -1351,13 +1415,10 @@ bool nv2a_window_pump(void)
             if (ev.key.keysym.sym == SDLK_F11 ||
                 (ev.key.keysym.sym == SDLK_RETURN &&
                  (ev.key.keysym.mod & KMOD_ALT))) {
+                /* fullscreen, or out of it to the mode the menus have (a window or borderless; a window when
+                 * theirs is fullscreen) -- the menus show the mode the window is in (nv2a_window_mode) */
                 bool fs = SDL_GetWindowFlags(s_window) & SDL_WINDOW_FULLSCREEN;
-                mode_switch_begin();
-                SDL_SetWindowFullscreen(s_window,
-                                        fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
-                if (fs)
-                    SDL_SetWindowBordered(s_window, SDL_TRUE);
-                mode_switch_end();
+                window_apply(fs ? (s_win_fs == 2 ? 2 : 0) : 1, s_win_w, s_win_h);
             }
             break;
         default:

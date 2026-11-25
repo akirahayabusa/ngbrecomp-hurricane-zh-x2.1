@@ -160,7 +160,10 @@ int ngb_pc_setting(int which)
     case 0:  return s_running.scale;
     case 1:  return s_running.anisotropy;
     case 2:  return s_running.shadow_scale;
-    case 3:  return s_running.fullscreen;
+    case 3: {   /* the mode the window is in (or is being put in): F11 and Alt+Enter change it too, not the setting */
+        int w, h, m = nv2a_window_mode(&w, &h);
+        return m >= 0 ? m : s_running.fullscreen;
+    }
     case 4:  return s_running.vsync;
     case 6: {                                  /* the window size: aspect * 8 + its index */
         int i = ngb_settings_size_index(&s_running);
