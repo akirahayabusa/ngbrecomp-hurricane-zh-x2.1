@@ -177,8 +177,8 @@ cat	Controls	按键	P
 	Karma Window On/Off	业力显示	P
 	Pause	暂停	P
 	Back	BACK键	P
-	First-Person View	第一人称视角	P
-	Right Stick Button	按下右摇杆	P
+	Left Stick Button	左摇杆按键	P
+	Toggle Camera Mode	切换镜头模式	P
 	Move Forward	向前移动	P
 	Move Back	向后移动	P
 	Move Left	向左移动	P
@@ -203,8 +203,8 @@ cat	Controls	按键	P
 	Shows or hides the karma window.	显示或隐藏业力窗口	P
 	The pause menu.	打开暂停菜单	P
 	The controller's Back button.	控制器的BACK键	P
-	Looks through Ryu's eyes (the left stick's button).	以龙的视角观看（按下左摇杆）	P
-	The right stick's button.	按下右摇杆	P
+	The controller's left stick button.	手柄的左摇杆按键	P
+	Switches the right stick between turning the camera and looking in first person (the right stick's button).	右摇杆在转动镜头与第一人称观看之间切换（右摇杆按键）	P
 	Moves Ryu (the left stick).	移动龙（左摇杆）	P
 	Turns the camera (the right stick; the mouse too).	转动镜头（右摇杆，鼠标亦可）	P
 	The controller's directional pad.	控制器的十字键	P
