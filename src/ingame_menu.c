@@ -1203,6 +1203,7 @@ static void mouse_test_tick(void)
     switch (c) {
     case 'M':
         e.type = SDL_MOUSEMOTION; e.motion.windowID = id; e.motion.x = x; e.motion.y = y;
+        e.motion.which = NV2A_MOUSEID_SCRIPTED;   /* (the pointer itself unmoved: still a move, nv2a_window.h) */
         break;
     case 'L': case 'R':
         e.type = SDL_MOUSEBUTTONDOWN; e.button.windowID = id; e.button.x = x; e.button.y = y;
@@ -1255,8 +1256,11 @@ static bool game_mouse(const SDL_Event *ev)
         if (ev->type == SDL_MOUSEMOTION) {
             game_point(ev->motion.windowID, ev->motion.x, ev->motion.y, &gx, &gy);
             row = tab_hit(gx, gy, &zone);
-            if (row >= 0 && s_tab_focus && row != hover)
+            if (row >= 0 && s_tab_focus && row != hover) {
+                if (mouse_log())
+                    fprintf(stderr, "[MOUSE] pause page: row %d (was %d) at %.0f,%.0f\n", row, hover, gx, gy);
                 tab_push(TAB_ROW | row);
+            }
             hover = row;
             s_mx = (int)gx;                       /* the tabs, for hover_tick */
             s_my = (int)gy;
@@ -1359,6 +1363,13 @@ void nv2a_window_event_hook(const void *sdl_event)
 {
     const SDL_Event *ev = sdl_event;
     extern int ngb_quick_event(const void *event);
+    /* A motion the player did not make (the window changed under a pointer at rest: nv2a_window.h) moves no menu's
+     * cursor -- the pause page's rows, the game's menus (hover_tick), the quick menu, all from here. */
+    if (ev->type == SDL_MOUSEMOTION && !nv2a_mouse_motion_by_player(ev)) {
+        if (mouse_log())
+            fprintf(stderr, "[MOUSE] menus: a motion not the player's, left alone\n");
+        return;
+    }
     if (ngb_quick_event(ev)) return;
     if (ev->type == SDL_KEYDOWN && ev->key.keysym.sym == SDLK_F7 && !ev->key.repeat) {
         extern volatile int ngb_trace_request;   /* src/d3d/vk/backend.cpp: record the next frames */

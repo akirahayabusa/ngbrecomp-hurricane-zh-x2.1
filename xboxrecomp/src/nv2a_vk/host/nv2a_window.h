@@ -21,6 +21,21 @@ void nv2a_window_tick(void);
 /* Every SDL_Event also goes here (weak; define it to see input). */
 void nv2a_window_event_hook(const void *sdl_event);
 
+/* Mouse motion the player did not make. SDL reports a motion whenever the pointer's place in a window changes,
+ * also when it is the window that changed under a pointer at rest: a display mode switch (window, borderless,
+ * fullscreen), the window resized or moved, a fullscreen display mode, the window coming to the front or the
+ * pointer entering it. Taken for a move, that one selected the menu row under the resting pointer (the next press
+ * then changed that row's setting) and made the mouse the device in use while a controller was. An event filter,
+ * ahead of every watcher and of the queue, marks those events: their mouse id becomes NV2A_MOUSEID_NOT_PLAYER and
+ * their xrel/yrel 0 (no camera turn, no switch of device). Install once SDL's video is up (again after it was
+ * shut down: SDL drops its filter then); the window and the settings screen both do. */
+#define NV2A_MOUSEID_NOT_PLAYER ((uint32_t)-2)
+/* A motion a test script makes (SDL_PushEvent, the pointer itself unmoved): the player's (its id becomes 0). */
+#define NV2A_MOUSEID_SCRIPTED ((uint32_t)-3)
+void nv2a_mouse_filter_install(void);
+/* A motion (SDL_MOUSEMOTION) the player made: false for one the filter marked. */
+bool nv2a_mouse_motion_by_player(const void *sdl_event);
+
 /* A host overlay over the paused game (a settings menu). The presenter asks
  * nv2a_overlay_wanted() at every frame; once it says yes, the game is held
  * at that frame (its next flip waits) and nv2a_overlay_frame() draws the

@@ -1153,6 +1153,7 @@ int nv2a_window_create(const char *title, int width, int height,
         fprintf(stderr, "nv2a: SDL video: %s\n", SDL_GetError());
         return -1;
     }
+    nv2a_mouse_filter_install();   /* before the window: its first motions too */
     s_window = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED,
                                 SDL_WINDOWPOS_CENTERED, width, height,
                                 (getenv("NGB_TEST_HIDDEN") ? SDL_WINDOW_HIDDEN : 0) |
@@ -1370,6 +1371,119 @@ bool nv2a_window_pump(void)
 __attribute__((weak)) void nv2a_window_event_hook(const void *sdl_event)
 {
     (void)sdl_event;
+}
+
+/* ---- Mouse motion the player did not make (see nv2a_window.h) ----
+ *
+ * The window and the screen under the pointer as at the last motion: a change since means the motion reports the
+ * window's change, not a move of the mouse. All on the main thread (SDL calls its filter from SDL_PushEvent, the
+ * events from the system arriving in the pump there). */
+typedef struct {
+    int x, y, w, h, dw, dh;
+    Uint32 flags;
+} mouse_geom;
+static mouse_geom s_mouse_geom;
+static int s_mouse_seen;            /* a motion seen since the filter was installed */
+static int s_mouse_entered;         /* the window came to the front, the pointer into it, or the relative mode (the
+                                     * camera) ended: the next motion is that, not a move */
+static int s_mouse_gx, s_mouse_gy;  /* where the pointer was on the desktop, at the last motion */
+
+static void mouse_geom_of(Uint32 window_id, mouse_geom *g)
+{
+    SDL_Window *w = SDL_GetWindowFromID(window_id);
+    SDL_DisplayMode m;
+    memset(g, 0, sizeof *g);
+    if (!w)
+        return;
+    SDL_GetWindowPosition(w, &g->x, &g->y);
+    SDL_GetWindowSize(w, &g->w, &g->h);
+    g->flags = SDL_GetWindowFlags(w) & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_BORDERLESS |
+                                        SDL_WINDOW_MAXIMIZED | SDL_WINDOW_MINIMIZED);
+    int d = SDL_GetWindowDisplayIndex(w);
+    if (d >= 0 && SDL_GetCurrentDisplayMode(d, &m) == 0) {   /* (a fullscreen mode rescales the desktop's points) */
+        g->dw = m.w;
+        g->dh = m.h;
+    }
+}
+
+/* Where the desktop's pointer is can be asked on Windows, X11 and macOS; elsewhere (Wayland, Android) SDL answers
+ * with the window's own coordinates, which move with the window. */
+static int mouse_global_known(void)
+{
+    static int known = -1;
+    if (known < 0) {
+        const char *d = SDL_GetCurrentVideoDriver();
+        known = d && (!strcmp(d, "windows") || !strcmp(d, "x11") || !strcmp(d, "cocoa"));
+    }
+    return known;
+}
+
+static int SDLCALL mouse_filter(void *unused, SDL_Event *ev)
+{
+    (void)unused;
+    if (ev->type == SDL_WINDOWEVENT) {
+        switch (ev->window.event) {
+        case SDL_WINDOWEVENT_ENTER:
+        case SDL_WINDOWEVENT_FOCUS_GAINED:
+        case SDL_WINDOWEVENT_SHOWN:
+        case SDL_WINDOWEVENT_RESTORED:
+            s_mouse_entered = 1;
+            break;
+        default:
+            break;
+        }
+        return 1;
+    }
+    if (ev->type != SDL_MOUSEMOTION || ev->motion.which == SDL_TOUCH_MOUSEID ||
+        ev->motion.which == NV2A_MOUSEID_NOT_PLAYER)
+        return 1;
+    if (ev->motion.which == NV2A_MOUSEID_SCRIPTED) {   /* a test's: the player's, as if moved */
+        ev->motion.which = 0;
+        return 1;
+    }
+    if (SDL_GetRelativeMouseMode()) {   /* the camera: the mouse's own motion, the pointer held in place */
+        s_mouse_entered = 1;            /* (out of it SDL puts the pointer back: that motion is SDL's) */
+        return 1;
+    }
+    mouse_geom g;
+    int gx = 0, gy = 0;
+    mouse_geom_of(ev->motion.windowID, &g);
+    if (mouse_global_known())
+        SDL_GetGlobalMouseState(&gx, &gy);
+    int player = s_mouse_seen && !s_mouse_entered && memcmp(&g, &s_mouse_geom, sizeof g) == 0 &&
+                 (ev->motion.xrel || ev->motion.yrel) &&
+                 (!mouse_global_known() || gx != s_mouse_gx || gy != s_mouse_gy);
+    s_mouse_geom = g;
+    s_mouse_gx = gx;
+    s_mouse_gy = gy;
+    s_mouse_seen = 1;
+    s_mouse_entered = 0;
+    if (!player) {
+        if (getenv("NGB_MOUSE_LOG"))
+            fprintf(stderr, "[MOUSE] not the player's: motion to %d,%d (rel %d,%d)\n", ev->motion.x, ev->motion.y,
+                    ev->motion.xrel, ev->motion.yrel);
+        ev->motion.which = NV2A_MOUSEID_NOT_PLAYER;
+        ev->motion.xrel = ev->motion.yrel = 0;
+    }
+    return 1;
+}
+
+void nv2a_mouse_filter_install(void)
+{
+    SDL_EventFilter f = NULL;
+    void *u = NULL;
+    if (SDL_GetEventFilter(&f, &u) && f == mouse_filter)
+        return;
+    if (f)
+        fprintf(stderr, "nv2a: an SDL event filter was set already: the mouse's takes its place\n");
+    s_mouse_seen = 0;   /* (the first motion in a new window: a pointer resting over it) */
+    SDL_SetEventFilter(mouse_filter, NULL);
+}
+
+bool nv2a_mouse_motion_by_player(const void *sdl_event)
+{
+    const SDL_Event *ev = sdl_event;
+    return ev->type == SDL_MOUSEMOTION && ev->motion.which != NV2A_MOUSEID_NOT_PLAYER;
 }
 
 __attribute__((weak)) bool nv2a_overlay_wanted(void)

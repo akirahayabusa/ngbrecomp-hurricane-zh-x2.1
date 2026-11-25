@@ -599,6 +599,7 @@ int ngb_launcher_run(NgbSettings *s)
         fprintf(stderr, "settings screen: %s\n", SDL_GetError());
         return 1;                /* no screen: just start */
     }
+    nv2a_mouse_filter_install();   /* (motions the player did not make marked: nv2a_window.h) */
     win = SDL_CreateWindow(NGB_WINDOW_TITLE, SDL_WINDOWPOS_CENTERED,
                            SDL_WINDOWPOS_CENTERED, LW, LH,
                            SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
@@ -614,7 +615,6 @@ int ngb_launcher_run(NgbSettings *s)
         return 1;
     }
     SDL_RenderSetLogicalSize(r, LW, LH);
-    Uint32 t_open = SDL_GetTicks();
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
     for (int i = 0; i < SDL_NumJoysticks() && !pad; i++)
         if (SDL_IsGameController(i))
@@ -675,8 +675,9 @@ int ngb_launcher_run(NgbSettings *s)
                 break;
             case SDL_MOUSEMOTION: {
                 /* A pointer already resting over the window reports a
-                 * motion at once; only a real move should select. */
-                if (SDL_GetTicks() - t_open < 500)
+                 * motion at once, and again as the window comes to the
+                 * front: only a real move should select. */
+                if (!nv2a_mouse_motion_by_player(&ev))
                     break;
                 int row = row_at(ev.motion.y);
                 if (row >= 0) sel = row;
